@@ -22,6 +22,7 @@ dev = [
 memory-agent = "app.main:main"
 memory-agent-dev = "app.dev:main"
 memory-agent-watch-errors = "app.log_watch:main"
+memory-audit = "app.memory_audit:main"
 obsidian-ingest = "app.memory.obsidian_importer:main"
 chat-export-ingest = "app.memory.chat_importer:main"
 

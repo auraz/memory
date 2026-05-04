@@ -6,6 +6,7 @@ from app.agent.service import AgentService
 from app.agent.skills import get_skill, render_skills
 from app.approvals.policy import ApprovalMode, ApprovalPolicy
 from app.memory.chat_importer import ingest_chat_documents, load_chat_documents
+from app.memory.audit import build_memory_audit, render_memory_audit
 from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
@@ -70,6 +71,11 @@ def create_dispatcher(
             f"Status: {durability}\n"
             f"Storage: {agent.memory.storage_path}"
         )
+
+    @dp.message(Command("memory_audit"))
+    async def memory_audit(message: Message) -> None:
+        audit = build_memory_audit(agent.memory, ingest_runs, source_items)
+        await message.answer(render_memory_audit(audit)[:3900])
 
     @dp.message(Command("skills"))
     async def skills(message: Message) -> None:
