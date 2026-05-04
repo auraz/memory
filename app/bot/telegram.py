@@ -10,7 +10,7 @@ from app.memory.audit import build_memory_audit, render_memory_audit
 from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
-from app.storage import ChatSettingsStore, IngestRunStore, SourceItemStore
+from app.storage import ChatEventStore, ChatSettingsStore, IngestRunStore, SourceItemStore
 
 DEFAULT_INGEST_LIMIT = 25
 
@@ -20,6 +20,7 @@ def create_dispatcher(
     approvals: ApprovalPolicy,
     ingest_runs: IngestRunStore,
     chat_settings: ChatSettingsStore,
+    chat_events: ChatEventStore,
     source_items: SourceItemStore,
 ) -> Dispatcher:
     dp = Dispatcher()
@@ -70,7 +71,8 @@ def create_dispatcher(
             await message.answer("Usage: /context <message to inspect>")
             return
         selected = chat_settings.get(str(message.chat.id)).skill_name
-        preview = await agent.preview_context(query, skill_name=selected)
+        today_context = chat_events.today_context(str(message.chat.id))
+        preview = await agent.preview_context(query, skill_name=selected, today_context=today_context)
         skill = preview.selected_skill or "none"
         recall = f"failed: {preview.recall_error}" if preview.recall_error else "ok"
         await message.answer(
@@ -78,6 +80,7 @@ def create_dispatcher(
                 "Context preview\n"
                 f"Skill: {skill}\n"
                 f"Recall: {recall}\n\n"
+                f"{preview.today_context}\n\n"
                 f"{preview.context_packet}"
             )[:3900]
         )
@@ -326,8 +329,12 @@ def create_dispatcher(
     @dp.message(F.text)
     async def chat(message: Message) -> None:
         assert message.text is not None
+        chat_id = str(message.chat.id)
         selected = chat_settings.get(str(message.chat.id)).skill_name
-        response = await agent.respond(message.text, skill_name=selected)
+        today_context = chat_events.today_context(chat_id)
+        response = await agent.respond(message.text, skill_name=selected, today_context=today_context)
+        chat_events.append(chat_id, "user", message.text)
+        chat_events.append(chat_id, "assistant", response)
         await message.answer(response[:3900])
 
     return dp
@@ -338,12 +345,13 @@ async def run_bot(
     approvals: ApprovalPolicy,
     ingest_runs: IngestRunStore,
     chat_settings: ChatSettingsStore,
+    chat_events: ChatEventStore,
     source_items: SourceItemStore,
 ) -> None:
     if not settings.telegram_bot_token_frakir:
         raise RuntimeError("TELEGRAM_BOT_TOKEN_FRAKIR is required")
     bot = Bot(token=settings.telegram_bot_token_frakir)
-    dp = create_dispatcher(agent, approvals, ingest_runs, chat_settings, source_items)
+    dp = create_dispatcher(agent, approvals, ingest_runs, chat_settings, chat_events, source_items)
     print("Frakir Telegram bot is running. Press Ctrl+C to stop.", flush=True)
     await dp.start_polling(bot)
 

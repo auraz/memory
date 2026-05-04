@@ -7,7 +7,7 @@ from app.memory import CogneeMemory
 from app.providers import create_provider
 from app.runtime_limits import raise_file_descriptor_limit
 from app.settings import settings
-from app.storage import ChatSettingsStore, IngestRunStore, SourceItemStore, connect, init_db
+from app.storage import ChatEventStore, ChatSettingsStore, IngestRunStore, SourceItemStore, connect, init_db
 
 
 async def _async_main() -> None:
@@ -19,11 +19,12 @@ async def _async_main() -> None:
     queue = ApprovalQueue(conn)
     ingest_runs = IngestRunStore(conn)
     chat_settings = ChatSettingsStore(conn)
+    chat_events = ChatEventStore(conn)
     source_items = SourceItemStore(conn)
     provider = create_provider(settings)
     memory = CogneeMemory(max_items=settings.max_context_items)
     agent = AgentService(provider=provider, memory=memory, approvals=approvals, queue=queue)
-    await run_bot(agent, approvals, ingest_runs, chat_settings, source_items)
+    await run_bot(agent, approvals, ingest_runs, chat_settings, chat_events, source_items)
 
 
 def main() -> None:

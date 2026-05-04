@@ -13,6 +13,7 @@ from app.providers.base import LLMProvider
 class ContextPreview:
     message: str
     context_packet: str
+    today_context: str
     selected_skill: str | None
     recall_error: str | None = None
 
@@ -30,18 +31,33 @@ class AgentService:
         self.approvals = approvals
         self.queue = queue
 
-    async def respond(self, message: str, skill_name: str | None = None) -> str:
-        preview = await self.preview_context(message, skill_name=skill_name)
+    async def respond(
+        self,
+        message: str,
+        skill_name: str | None = None,
+        today_context: str | None = None,
+    ) -> str:
+        preview = await self.preview_context(message, skill_name=skill_name, today_context=today_context)
         skill = get_skill(preview.selected_skill)
         system_prompt = SYSTEM_PROMPT
         if skill is not None:
             system_prompt = f"{SYSTEM_PROMPT}\n\n{skill.instructions}"
 
         skill_line = f"Selected answer skill: {skill.name}" if skill is not None else "Selected answer skill: none"
-        user_payload = f"{preview.context_packet}\n\n{skill_line}\n\nUser message:\n{message}"
+        user_payload = (
+            f"{preview.today_context}\n\n"
+            f"{preview.context_packet}\n\n"
+            f"{skill_line}\n\n"
+            f"User message:\n{message}"
+        )
         return await self.provider.complete(system_prompt, user_payload)
 
-    async def preview_context(self, message: str, skill_name: str | None = None) -> ContextPreview:
+    async def preview_context(
+        self,
+        message: str,
+        skill_name: str | None = None,
+        today_context: str | None = None,
+    ) -> ContextPreview:
         if self.approvals.is_denied("memory.recall"):
             context_packet = "Long-term memory recall is denied by policy."
             recall_error = None
@@ -58,6 +74,7 @@ class AgentService:
         return ContextPreview(
             message=message,
             context_packet=context_packet,
+            today_context=today_context or "No prior Telegram messages with the bot today.",
             selected_skill=skill.name if skill is not None else None,
             recall_error=recall_error,
         )

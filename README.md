@@ -129,6 +129,7 @@ Skills modify how the bot writes normal answers after automatic memory recall. T
 ## Memory Sources
 
 Normal chat messages automatically recall from Cognee and pass the retrieved context into the LLM. `/recall <topic>` is a direct recall/debug command.
+Normal chat messages also include a compact "today with this Telegram chat" context from the same chat, saved locally in SQLite.
 
 Supported ingest sources:
 

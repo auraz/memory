@@ -33,15 +33,17 @@ def test_preview_context_shows_recalled_memory_and_auto_skill(tmp_path):
     assert preview.selected_skill == "research"
     assert preview.recall_error is None
     assert "[M1] (test) memory for what did I work on emotions?" in preview.context_packet
+    assert preview.today_context == "No prior Telegram messages with the bot today."
 
 
 def test_respond_sends_context_to_provider(tmp_path):
     provider = FakeProvider()
     agent = AgentService(provider, FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
 
-    response = asyncio.run(agent.respond("brainstorm ideas", skill_name="auto"))
+    response = asyncio.run(agent.respond("brainstorm ideas", skill_name="auto", today_context="Today with this Telegram chat: hi"))
 
     assert response == "done"
     assert "Skill: brainstorm" in provider.system
+    assert "Today with this Telegram chat: hi" in provider.user
     assert "Relevant long-term memory" in provider.user
     assert "User message:\nbrainstorm ideas" in provider.user

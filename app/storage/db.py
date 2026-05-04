@@ -15,6 +15,7 @@ create table if not exists pending_actions (
 create table if not exists chat_events (
   id integer primary key autoincrement,
   telegram_chat_id text not null,
+  local_date text not null default '',
   role text not null,
   content text not null,
   created_at text not null default current_timestamp
@@ -70,3 +71,10 @@ def connect(path: Path) -> sqlite3.Connection:
 def init_db(path: Path) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "chat_events", "local_date", "text not null default ''")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"alter table {table} add column {column} {definition}")
