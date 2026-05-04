@@ -83,12 +83,12 @@ class CogneeMemory:
             self._fallback.clear()
             return
         api_error: Exception | None = None
-        if hasattr(self._cognee, "forget"):
+        if self._has_local_cognee_database() and hasattr(self._cognee, "forget"):
             try:
                 await self._maybe_await(self._cognee.forget(everything=True))
             except Exception as exc:
                 api_error = exc
-        if hasattr(self._cognee, "prune"):
+        if self._has_local_cognee_database() and hasattr(self._cognee, "prune"):
             try:
                 await self._maybe_await(self._cognee.prune.prune_data())
                 await self._maybe_await(self._cognee.prune.prune_system(metadata=True))
@@ -157,6 +157,11 @@ class CogneeMemory:
                 raise RuntimeError(f"Refusing to delete unsafe Cognee path: {path}")
             shutil.rmtree(path, ignore_errors=True)
             path.mkdir(parents=True, exist_ok=True)
+
+    def _has_local_cognee_database(self) -> bool:
+        system_root = Path(os.environ["SYSTEM_ROOT_DIRECTORY"]).expanduser().resolve()
+        databases_dir = system_root / "databases"
+        return databases_dir.exists() and any(databases_dir.iterdir())
 
     def _is_safe_cognee_path(self, path: Path) -> bool:
         if path in {Path("/"), Path.home(), Path.cwd().resolve()}:
