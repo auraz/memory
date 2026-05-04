@@ -1,6 +1,7 @@
 import os
 import inspect
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,14 +82,24 @@ class CogneeMemory:
         if self._cognee is None:
             self._fallback.clear()
             return
+        api_error: Exception | None = None
         if hasattr(self._cognee, "forget"):
-            await self._maybe_await(self._cognee.forget(everything=True))
-            return
+            try:
+                await self._maybe_await(self._cognee.forget(everything=True))
+            except Exception as exc:
+                api_error = exc
         if hasattr(self._cognee, "prune"):
-            await self._maybe_await(self._cognee.prune.prune_data())
-            await self._maybe_await(self._cognee.prune.prune_system(metadata=True))
-            return
-        raise RuntimeError("Cognee reset API is unavailable")
+            try:
+                await self._maybe_await(self._cognee.prune.prune_data())
+                await self._maybe_await(self._cognee.prune.prune_system(metadata=True))
+            except Exception as exc:
+                api_error = api_error or exc
+        self._reset_storage_directories()
+        if api_error is not None:
+            logging.warning(
+                "Cognee API reset failed; local storage was cleared",
+                exc_info=(type(api_error), api_error, api_error.__traceback__),
+            )
 
     def _normalize_one(self, item: object) -> MemoryItem:
         if isinstance(item, MemoryItem):
@@ -138,6 +149,19 @@ class CogneeMemory:
             path = Path(os.environ.get(key, value)).expanduser()
             os.environ[key] = str(path.resolve())
             path.mkdir(parents=True, exist_ok=True)
+
+    def _reset_storage_directories(self) -> None:
+        for key in ("SYSTEM_ROOT_DIRECTORY", "DATA_ROOT_DIRECTORY", "CACHE_ROOT_DIRECTORY"):
+            path = Path(os.environ[key]).expanduser().resolve()
+            if not self._is_safe_cognee_path(path):
+                raise RuntimeError(f"Refusing to delete unsafe Cognee path: {path}")
+            shutil.rmtree(path, ignore_errors=True)
+            path.mkdir(parents=True, exist_ok=True)
+
+    def _is_safe_cognee_path(self, path: Path) -> bool:
+        if path in {Path("/"), Path.home(), Path.cwd().resolve()}:
+            return False
+        return any("cognee" in part.lower() for part in path.parts)
 
     def _configure_llm_env(self) -> None:
         app_provider = os.environ.get("LLM_PROVIDER", "openai").lower()

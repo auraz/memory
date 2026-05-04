@@ -91,7 +91,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 - `/memory_audit` reports memory integrity counters and recent Cognee errors.
 - `/skills` lists answer skills.
 - `/skill <name|auto|off>` sets the current chat's answer skill.
-- `/reset_memory confirm` clears Cognee memory and the ingest manifest when `memory.reset` is allowed.
+- `/reset_memory confirm` clears Cognee's local `system`, `storage`, and `cache` data plus the ingest manifest when `memory.reset` is allowed.
 - `/remember <text>` proposes or stores a memory depending on policy.
 - `/pending` shows queued gated actions.
 - `/approve <id>` runs a queued action.
