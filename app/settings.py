@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     telegram_bot_token_frakir: str = ""
     llm_provider: str = Field(default="openai")
     openai_api_key: str = ""
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-5-mini"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-haiku-latest"
     obsidian_vault_path: Path = Path("../../1.Stable/ExpressionVault")
