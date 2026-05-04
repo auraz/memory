@@ -87,6 +87,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 
 - `/start` confirms the local agent is running.
 - `/recall <topic>` recalls memory directly.
+- `/context <message>` previews the long-term memory packet and skill that a normal answer would receive.
 - `/memory_status` shows whether memory is using Cognee or volatile fallback.
 - `/memory_audit` reports memory integrity counters and recent Cognee errors.
 - `/skills` lists answer skills.

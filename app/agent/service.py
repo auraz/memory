@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from app.agent.context_builder import build_context_packet
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.skills import get_skill, select_auto_skill
@@ -5,6 +7,14 @@ from app.approvals.policy import ApprovalPolicy
 from app.approvals.queue import ApprovalQueue, PendingAction
 from app.memory.cognee_store import CogneeMemory
 from app.providers.base import LLMProvider
+
+
+@dataclass(frozen=True)
+class ContextPreview:
+    message: str
+    context_packet: str
+    selected_skill: str | None
+    recall_error: str | None = None
 
 
 class AgentService:
@@ -21,24 +31,36 @@ class AgentService:
         self.queue = queue
 
     async def respond(self, message: str, skill_name: str | None = None) -> str:
-        if self.approvals.is_denied("memory.recall"):
-            context_packet = "Long-term memory recall is denied by policy."
-        else:
-            memories, error = await self.memory.safe_recall(message)
-            if error:
-                context_packet = f"Long-term memory recall failed: {error}"
-            else:
-                context_packet = build_context_packet(memories)
-
-        resolved_skill_name = select_auto_skill(message) if skill_name == "auto" else skill_name
-        skill = get_skill(resolved_skill_name)
+        preview = await self.preview_context(message, skill_name=skill_name)
+        skill = get_skill(preview.selected_skill)
         system_prompt = SYSTEM_PROMPT
         if skill is not None:
             system_prompt = f"{SYSTEM_PROMPT}\n\n{skill.instructions}"
 
         skill_line = f"Selected answer skill: {skill.name}" if skill is not None else "Selected answer skill: none"
-        user_payload = f"{context_packet}\n\n{skill_line}\n\nUser message:\n{message}"
+        user_payload = f"{preview.context_packet}\n\n{skill_line}\n\nUser message:\n{message}"
         return await self.provider.complete(system_prompt, user_payload)
+
+    async def preview_context(self, message: str, skill_name: str | None = None) -> ContextPreview:
+        if self.approvals.is_denied("memory.recall"):
+            context_packet = "Long-term memory recall is denied by policy."
+            recall_error = None
+        else:
+            memories, error = await self.memory.safe_recall(message)
+            if error:
+                context_packet = f"Long-term memory recall failed: {error}"
+                recall_error = error
+            else:
+                context_packet = build_context_packet(memories)
+                recall_error = None
+        resolved_skill_name = select_auto_skill(message) if skill_name == "auto" else skill_name
+        skill = get_skill(resolved_skill_name)
+        return ContextPreview(
+            message=message,
+            context_packet=context_packet,
+            selected_skill=skill.name if skill is not None else None,
+            recall_error=recall_error,
+        )
 
     async def propose_memory_write(self, text: str) -> str:
         mode = self.approvals.mode_for("memory.write")

@@ -63,6 +63,25 @@ def create_dispatcher(
         body = "\n\n".join(f"- {item.text}" for item in memories)
         await message.answer(body[:3900])
 
+    @dp.message(Command("context"))
+    async def context(message: Message) -> None:
+        query = (message.text or "").replace("/context", "", 1).strip()
+        if not query:
+            await message.answer("Usage: /context <message to inspect>")
+            return
+        selected = chat_settings.get(str(message.chat.id)).skill_name
+        preview = await agent.preview_context(query, skill_name=selected)
+        skill = preview.selected_skill or "none"
+        recall = f"failed: {preview.recall_error}" if preview.recall_error else "ok"
+        await message.answer(
+            (
+                "Context preview\n"
+                f"Skill: {skill}\n"
+                f"Recall: {recall}\n\n"
+                f"{preview.context_packet}"
+            )[:3900]
+        )
+
     @dp.message(Command("memory_status"))
     async def memory_status(message: Message) -> None:
         durability = "durable" if agent.memory.is_durable else "not durable; lost on restart"
