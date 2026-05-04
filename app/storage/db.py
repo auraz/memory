@@ -1,0 +1,72 @@
+import sqlite3
+from pathlib import Path
+
+
+SCHEMA = """
+create table if not exists pending_actions (
+  id integer primary key autoincrement,
+  tool_name text not null,
+  payload_json text not null,
+  status text not null default 'pending',
+  created_at text not null default current_timestamp,
+  decided_at text
+);
+
+create table if not exists chat_events (
+  id integer primary key autoincrement,
+  telegram_chat_id text not null,
+  role text not null,
+  content text not null,
+  created_at text not null default current_timestamp
+);
+
+create table if not exists ingest_runs (
+  id integer primary key autoincrement,
+  source text not null,
+  status text not null,
+  total_files integer not null default 0,
+  processed_files integer not null default 0,
+  message text not null default '',
+  started_at text not null default current_timestamp,
+  updated_at text not null default current_timestamp,
+  finished_at text
+);
+
+create table if not exists ingested_files (
+  path text primary key,
+  size_bytes integer not null,
+  mtime_ns integer not null,
+  status text not null,
+  run_id integer,
+  updated_at text not null default current_timestamp
+);
+
+create table if not exists chat_settings (
+  telegram_chat_id text primary key,
+  skill_name text,
+  updated_at text not null default current_timestamp
+);
+
+create table if not exists imported_source_items (
+  source text not null,
+  item_id text not null,
+  fingerprint text not null,
+  status text not null,
+  message text not null default '',
+  updated_at text not null default current_timestamp,
+  primary key (source, item_id)
+);
+
+"""
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db(path: Path) -> None:
+    with connect(path) as conn:
+        conn.executescript(SCHEMA)
