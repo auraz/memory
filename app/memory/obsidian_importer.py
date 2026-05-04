@@ -13,6 +13,8 @@ IGNORED_DIRS = {".git", ".obsidian", ".trash", "node_modules"}
 MAX_UNBROKEN_LINE_CHARS = 2000
 MAX_NOTE_CHARS_PER_MEMORY = 6000
 BASE64ISH_RE = re.compile(r"^[A-Za-z0-9+/=\s]{200,}$")
+FORBIDDEN_PAYLOAD_MARKERS = ["```compressed-json", "compressed-json", "## Drawing"]
+COGNEE_MAX_WORD_CHARS = 8191
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,18 @@ def sanitize_note(content: str) -> SanitizedNote:
         stripped = line.strip()
 
         if stripped == "%%" and _starts_excalidraw_drawing_block(lines, index):
+            removed_blocks += 1
+            removed += 1
+            index += 1
+            while index < len(lines):
+                removed += 1
+                if lines[index].strip() == "%%":
+                    index += 1
+                    break
+                index += 1
+            continue
+
+        if stripped == "## Drawing":
             removed_blocks += 1
             removed += 1
             index += 1
@@ -123,6 +137,15 @@ def chunk_text(text: str, max_chars: int = MAX_NOTE_CHARS_PER_MEMORY) -> list[st
     return [chunk for chunk in chunks if chunk]
 
 
+def validate_cognee_payload(payload: str) -> None:
+    for marker in FORBIDDEN_PAYLOAD_MARKERS:
+        if marker in payload:
+            raise ValueError(f"Sanitizer leak before Cognee ingest: {marker}")
+    longest = max((len(token) for token in payload.split()), default=0)
+    if longest > COGNEE_MAX_WORD_CHARS:
+        raise ValueError(f"Sanitizer leak before Cognee ingest: token length {longest}")
+
+
 ProgressCallback = Callable[[int, int, Path], Awaitable[None]]
 FailureCallback = Callable[[int, int, Path, Exception], Awaitable[None]]
 
@@ -175,6 +198,7 @@ async def ingest_obsidian(
                         else ""
                     )
                     payload = f"Source: {note_path}{chunk_label}{removed_label}\n\n{chunk}"
+                    validate_cognee_payload(payload)
                     await memory.remember(payload, source=str(note_path))
             count += 1
             if progress is not None:

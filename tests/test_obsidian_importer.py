@@ -6,6 +6,7 @@ from app.memory.obsidian_importer import (
     iter_markdown_files,
     read_note_readonly,
     sanitize_note,
+    validate_cognee_payload,
 )
 
 
@@ -95,6 +96,25 @@ ABCDEF+/ABCDEF+/ABCDEF+/ABCDEF+/ABCDEF+/
     assert sanitized.removed_blocks == 1
 
 
+def test_sanitize_note_drops_unwrapped_excalidraw_drawing_section():
+    content = """## Text Elements
+useful text
+## Drawing
+```compressed-json
+ABCDEF+/ABCDEF+/ABCDEF+/ABCDEF+/ABCDEF+/
+```
+after drawing should be removed
+"""
+
+    sanitized = sanitize_note(content)
+
+    assert "useful text" in sanitized.content
+    assert "## Drawing" not in sanitized.content
+    assert "ABCDEF" not in sanitized.content
+    assert "after drawing should be removed" not in sanitized.content
+    assert sanitized.removed_blocks == 1
+
+
 def test_real_failing_excalidraw_file_keeps_text_and_drops_payload():
     path = Path(
         "../../1.Stable/ExpressionVault/Areas/Personality/Psychology/"
@@ -115,7 +135,34 @@ def test_real_failing_excalidraw_file_keeps_text_and_drops_payload():
     assert max(len(chunk) for chunk in chunks) <= 6000
 
 
+def test_real_second_excalidraw_file_keeps_text_and_drops_payload():
+    path = Path(
+        "../../1.Stable/ExpressionVault/Projects/EM/my EM book/"
+        "Drawing 2024-05-18 15.55.28.excalidraw.md"
+    )
+    if not path.exists():
+        pytest.skip("Local ExpressionVault fixture is not available.")
+
+    raw = read_note_readonly(path)
+    sanitized = sanitize_note(raw)
+
+    assert "Naive project management" in sanitized.content
+    assert "## Drawing" not in sanitized.content
+    assert "compressed-json" not in sanitized.content
+    assert "N4KAkARALgngDgUwgLgAQQQDwMYEMA2" not in sanitized.content
+
+
 def test_chunk_text_splits_long_notes():
     chunks = chunk_text("a" * 10 + "\n\n" + "b" * 10, max_chars=15)
 
     assert chunks == ["aaaaaaaaaa", "bbbbbbbbbb"]
+
+
+def test_validate_cognee_payload_rejects_drawing_markers():
+    with pytest.raises(ValueError):
+        validate_cognee_payload("## Drawing\n```compressed-json\nabc")
+
+
+def test_validate_cognee_payload_rejects_long_tokens():
+    with pytest.raises(ValueError):
+        validate_cognee_payload("x" * 8192)
