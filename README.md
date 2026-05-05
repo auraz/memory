@@ -1,6 +1,8 @@
-# Personal Memory Agent
+# Frakir Memory Agent
 
-Local-first Telegram personal assistant with long-term memory through Cognee, OpenAI or Anthropic LLM providers, a read-only Obsidian importer, and text-file approval gates.
+Frakir is a local-first Telegram agent that turns personal knowledge into usable context: Obsidian notes, Claude/Codex/OpenClaw project memories, chat exports, and same-day Telegram history are indexed into durable Cognee memory and recalled before every answer.
+
+It is built for a private Mac workflow first, with public, inspectable code: read-only importers, explicit local storage, configurable OpenAI/Anthropic models, OpenClaw delegation, and a policy file for deciding which actions run automatically.
 
 ## Current Shape
 
