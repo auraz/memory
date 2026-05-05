@@ -55,10 +55,15 @@ def test_openclaw_task_is_queued_by_default(tmp_path):
     from app.approvals import ApprovalQueue
     from app.storage import connect, init_db
 
+    policy_path = tmp_path / "approvals.yaml"
+    policy_path.write_text(
+        "version: 1\ndefault: allow\ntools:\n  openclaw.agent_send:\n    mode: require_approval\n",
+        encoding="utf-8",
+    )
     init_db(db_path)
     with connect(db_path) as conn:
         queue = ApprovalQueue(conn)
-        agent = AgentService(FakeProvider(), FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), queue)
+        agent = AgentService(FakeProvider(), FakeMemory(), ApprovalPolicy(policy_path), queue)
 
         response = asyncio.run(agent.propose_openclaw_task("show recent photos", telegram_chat_id="123"))
         pending = queue.list_pending()

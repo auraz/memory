@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     chatgpt_export_path: Path | None = None
     claude_export_path: Path | None = None
     openclaw_export_path: Path | None = None
+    openclaw_workspace_path: Path = Path("~/.openclaw/workspace")
+    claude_projects_path: Path = Path("~/.claude/projects")
+    codex_projects_path: Path = Path("~/.codex/projects")
+    claude_project_memory_path: Path = Path("~/.claude/projects/-Users-ok--openclaw-workspace/memory")
+    openclaw_sessions_path: Path = Path("~/.openclaw/sessions")
+    claude_global_path: Path = Path("~/.claude/CLAUDE.md")
     sqlite_path: Path = Path("data/agent.sqlite")
     approval_policy_path: Path = Path("config/approvals.yaml")
     max_context_items: int = 8

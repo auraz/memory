@@ -7,6 +7,7 @@ from app.agent.skills import get_skill, render_skills
 from app.approvals.policy import ApprovalMode, ApprovalPolicy
 from app.memory.chat_importer import ingest_chat_documents, load_chat_documents
 from app.memory.audit import build_memory_audit, render_memory_audit
+from app.memory.local_sources import ingest_local_memory_documents, load_local_memory_documents
 from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
@@ -332,6 +333,44 @@ def create_dispatcher(
             f"Ingested: {ingested}\n"
             f"Failed: {failed}\n"
             f"Total processed for source: {source_items.count(source)}"
+        )
+
+    @dp.message(Command("ingest_memories"))
+    async def ingest_memories(message: Message) -> None:
+        parts = (message.text or "").split(maxsplit=1)
+        limit = DEFAULT_INGEST_LIMIT
+        if len(parts) == 2:
+            arg = parts[1].strip().lower()
+            if arg == "all":
+                limit = None
+            elif arg.isdigit():
+                limit = int(arg)
+            else:
+                await message.answer("Usage: /ingest_memories [limit|all]")
+                return
+        docs = load_local_memory_documents()
+        pending = [doc for doc in docs if not source_items.is_terminal(doc.source, doc.item_id, doc.fingerprint)]
+        selected = pending if limit is None else pending[:limit]
+        if not selected:
+            await message.answer(f"All {len(docs)} local memory documents are already processed.")
+            return
+        await message.answer(f"Starting local memory ingest: {len(selected)}/{len(pending)} pending documents.")
+        ingested = 0
+        failed = 0
+        for index, doc in enumerate(selected, start=1):
+            done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
+            if done:
+                source_items.mark(doc.source, doc.item_id, doc.fingerprint, "completed")
+                ingested += 1
+            else:
+                source_items.mark(doc.source, doc.item_id, doc.fingerprint, "failed", "Local memory ingest failed")
+                failed += failed_one or 1
+            if index == len(selected) or index % 25 == 0:
+                await message.answer(f"Local memory ingest progress: {index}/{len(selected)}")
+        await message.answer(
+            f"Local memory ingest complete.\n"
+            f"Ingested: {ingested}\n"
+            f"Failed: {failed}"
         )
 
     @dp.message(F.text)

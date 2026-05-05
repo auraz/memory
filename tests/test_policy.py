@@ -3,10 +3,10 @@ from pathlib import Path
 from app.approvals.policy import ApprovalMode, ApprovalPolicy
 
 
-def test_policy_defaults_to_require_approval(tmp_path: Path) -> None:
+def test_policy_defaults_to_allow(tmp_path: Path) -> None:
     policy = ApprovalPolicy(tmp_path / "missing.yaml")
 
-    assert policy.mode_for("unknown.tool") == ApprovalMode.REQUIRE_APPROVAL
+    assert policy.mode_for("unknown.tool") == ApprovalMode.ALLOW
 
 
 def test_policy_reads_and_writes_modes(tmp_path: Path) -> None:
@@ -23,4 +23,3 @@ def test_policy_reads_and_writes_modes(tmp_path: Path) -> None:
     reloaded = ApprovalPolicy(path)
 
     assert reloaded.is_denied("shell.run")
-

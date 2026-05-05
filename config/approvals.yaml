@@ -1,29 +1,29 @@
-default: require_approval
+default: allow
 tools:
   local_files.read:
-    mode: require_approval
+    mode: allow
   local_files.write:
-    mode: require_approval
+    mode: allow
   memory.delete:
-    mode: require_approval
+    mode: allow
   memory.recall:
     mode: allow
   memory.reset:
     mode: allow
   memory.write:
-    mode: require_approval
+    mode: allow
   obsidian.read:
     mode: allow
   obsidian.write:
     mode: deny
   openclaw.agent_send:
-    mode: require_approval
+    mode: allow
   shell.run:
-    mode: require_approval
+    mode: deny
   telegram.reply_to_user:
     mode: allow
   telegram.send_to_other:
-    mode: require_approval
+    mode: allow
   web.request:
-    mode: require_approval
+    mode: allow
 version: 1

@@ -25,6 +25,7 @@ memory-agent-watch-errors = "app.log_watch:main"
 memory-audit = "app.memory_audit:main"
 obsidian-ingest = "app.memory.obsidian_importer:main"
 chat-export-ingest = "app.memory.chat_importer:main"
+local-memory-ingest = "app.memory.local_sources:main"
 
 [build-system]
 requires = ["setuptools>=69"]

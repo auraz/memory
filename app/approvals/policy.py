@@ -23,10 +23,10 @@ class ApprovalPolicy:
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"version": 1, "default": ApprovalMode.REQUIRE_APPROVAL.value, "tools": {}}
+            return {"version": 1, "default": ApprovalMode.ALLOW.value, "tools": {}}
         with self.path.open("r", encoding="utf-8") as handle:
             loaded = yaml.safe_load(handle) or {}
-        loaded.setdefault("default", ApprovalMode.REQUIRE_APPROVAL.value)
+        loaded.setdefault("default", ApprovalMode.ALLOW.value)
         loaded.setdefault("tools", {})
         return loaded
 
@@ -37,7 +37,7 @@ class ApprovalPolicy:
         tool = self._raw.get("tools", {}).get(tool_name)
         if isinstance(tool, dict) and "mode" in tool:
             return ApprovalMode(tool["mode"])
-        return ApprovalMode(self._raw.get("default", ApprovalMode.REQUIRE_APPROVAL.value))
+        return ApprovalMode(self._raw.get("default", ApprovalMode.ALLOW.value))
 
     def is_allowed(self, tool_name: str) -> bool:
         return self.mode_for(tool_name) == ApprovalMode.ALLOW
@@ -60,4 +60,3 @@ class ApprovalPolicy:
             mode = rule.get("mode", self._raw.get("default")) if isinstance(rule, dict) else rule
             lines.append(f"{name}: {mode}")
         return "\n".join(lines)
-

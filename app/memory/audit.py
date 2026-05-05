@@ -62,6 +62,13 @@ def build_memory_audit(memory, ingest_runs: IngestRunStore, source_items: Source
             _source_audit("chatgpt", settings.chatgpt_export_path, source_items),
             _source_audit("claude", settings.claude_export_path, source_items),
             _source_audit("openclaw", settings.openclaw_export_path, source_items),
+            _source_audit("openclaw_workspace", settings.openclaw_workspace_path, source_items),
+            _source_audit("openclaw_workspace_memory", settings.openclaw_workspace_path / "memory", source_items),
+            _source_audit("claude_projects", settings.claude_projects_path, source_items),
+            _source_audit("codex_projects", settings.codex_projects_path, source_items),
+            _source_audit("claude_project_memory", settings.claude_project_memory_path, source_items),
+            _source_audit("openclaw_sessions", settings.openclaw_sessions_path, source_items),
+            _source_audit("claude_global", settings.claude_global_path, source_items),
         ],
         latest_ingest=latest_text,
         recent_errors=recent_cognee_errors(limit=5),
@@ -82,7 +89,7 @@ def render_memory_audit(audit: MemoryAudit) -> str:
         f"- processed: {audit.obsidian.processed}",
         f"- pending: {audit.obsidian.pending}",
         "",
-        "Chat sources:",
+        "Imported sources:",
     ]
     for source in audit.sources:
         configured = "configured" if source.configured else "not configured"
@@ -121,7 +128,7 @@ def _safe_obsidian_total() -> int:
 def _source_audit(source: str, path: Path | None, source_items: SourceItemStore) -> SourceAudit:
     return SourceAudit(
         source=source,
-        configured=bool(path),
+        configured=bool(path and path.expanduser().exists()),
         processed=source_items.count(source),
         completed=source_items.count(source, "completed"),
         failed=source_items.count(source, "failed"),

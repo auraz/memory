@@ -12,7 +12,7 @@ Local-first Telegram personal assistant with long-term memory through Cognee, Op
 - Reads Obsidian notes from `OBSIDIAN_VAULT_PATH` and never writes back to the vault.
 - Stores Cognee data under `data/cognee/` by default.
 - Stores approval policy in `config/approvals.yaml`.
-- Starts gated: memory recall and Obsidian reads are allowed, most actions require approval or are denied.
+- Starts auto-approved by default, with explicitly dangerous actions such as raw shell and Obsidian writes denied.
 
 ## Setup
 
@@ -100,6 +100,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 - `/deny <id>` rejects a queued action.
 - `/ingest_obsidian [limit|all]` imports the next uningested markdown notes from the configured vault. Defaults to 25 notes.
 - `/ingest_source <chatgpt|claude|openclaw> [limit|all]` imports exported chat conversations from configured paths.
+- `/ingest_memories [limit|all]` imports curated local memory files from OpenClaw, Claude, and Codex paths.
 - `/ingest_status` shows the latest import status.
 - `/approvals` shows the current policy file.
 - `/set_approval <tool.name> <allow|require_approval|deny>` edits the policy.
@@ -134,18 +135,26 @@ Normal chat messages also include a compact "today with this Telegram chat" cont
 
 ## OpenClaw Delegation
 
-`/openclaw <task>` queues a delegated OpenClaw agent turn. By default this uses:
+`/openclaw <task>` runs a delegated OpenClaw agent turn. By default this uses:
 
 ```bash
 openclaw agent --message "<task>" --session-id "frakir-telegram-<chat-id>" --timeout 600 --json --local
 ```
 
 Configure it with `OPENCLAW_CLI_PATH`, `OPENCLAW_AGENT_ID`, `OPENCLAW_LOCAL`, and `OPENCLAW_TIMEOUT_SECONDS`.
-The default approval policy is `openclaw.agent_send: require_approval`, so Frakir asks for `/approve <id>` before OpenClaw can run.
+The default approval policy is `openclaw.agent_send: allow`, so Frakir runs OpenClaw delegation immediately.
 
 Supported ingest sources:
 
 - Obsidian markdown vault via `OBSIDIAN_VAULT_PATH`
+- Curated local memories via `/ingest_memories`:
+  - `OPENCLAW_WORKSPACE_PATH` root files: `IDENTITY.md`, `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`
+  - `OPENCLAW_WORKSPACE_PATH/memory/**/*.{md,qmd,txt,json,jsonl}`
+  - `CLAUDE_PROJECTS_PATH/**/*.{md,qmd,txt,json,jsonl}`
+  - `CODEX_PROJECTS_PATH/**/*.{md,qmd,txt,json,jsonl}`
+  - `CLAUDE_PROJECT_MEMORY_PATH/**/*.{md,qmd,txt,json,jsonl}`
+  - `OPENCLAW_SESSIONS_PATH/**/*.{md,qmd,txt,json,jsonl}`
+  - `CLAUDE_GLOBAL_PATH`
 - ChatGPT exports via `CHATGPT_EXPORT_PATH`
 - Claude exports via `CLAUDE_EXPORT_PATH`
 - OpenClaw or generic chat exports via `OPENCLAW_EXPORT_PATH`
@@ -166,12 +175,14 @@ Then ingest from Telegram:
 /ingest_source chatgpt 25
 /ingest_source claude all
 /ingest_source openclaw all
+/ingest_memories all
 ```
 
 Or from the CLI:
 
 ```bash
 chat-export-ingest chatgpt /path/to/conversations.json --limit 25
+local-memory-ingest --limit 25
 ```
 
 ## Policy
@@ -184,15 +195,18 @@ Modes:
 - `require_approval`: tool must be staged for approval before running.
 - `deny`: tool cannot run.
 
-The MVP allows automatic recall:
+The default policy auto-approves tools:
 
 ```yaml
+default: allow
 tools:
-  memory.recall:
-    mode: allow
+  shell.run:
+    mode: deny
+  obsidian.write:
+    mode: deny
 ```
 
-This matches the intended direction: eventually more things can run without manual approval, but only when the policy gate explicitly allows them.
+Use explicit `deny` entries for actions that should never run, and `require_approval` for anything you want to temporarily gate.
 
 ## Large Vault Ingest
 
