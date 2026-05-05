@@ -18,6 +18,7 @@ from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
 from app.storage import ChatEventStore, ChatSettingsStore, IngestRunStore, SourceItemStore
+from app.storage.ingest_runs import IngestRun
 
 DEFAULT_INGEST_LIMIT = 25
 
@@ -280,15 +281,7 @@ def create_dispatcher(
         if run is None:
             await message.answer("No ingest runs yet.")
             return
-        await message.answer(
-            f"Ingest #{run.id}: {run.status}\n"
-            f"Progress: {run.processed_files}/{run.total_files}\n"
-            f"Completed files: {ingest_runs.completed_count()}\n"
-            f"Failed files: {ingest_runs.failed_count()}\n"
-            f"Processed files: {ingest_runs.terminal_count()}\n"
-            f"Last update: {run.updated_at}\n"
-            f"Last: {run.message or '-'}"
-        )
+        await message.answer(render_ingest_status(run, ingest_runs, source_items))
 
     @dp.message(Command("ingest_source"))
     async def ingest_source(message: Message) -> None:
@@ -490,3 +483,55 @@ def _source_path(source: str):
     if source == "openclaw":
         return settings.openclaw_export_path
     return None
+
+
+def render_ingest_status(
+    run: IngestRun,
+    ingest_runs: IngestRunStore,
+    source_items: SourceItemStore,
+) -> str:
+    lines = [
+        f"Ingest #{run.id}: {run.status}",
+        f"Source: {run.source}",
+        f"Progress: {run.processed_files}/{run.total_files}",
+    ]
+    if run.source == "vault":
+        lines.extend(
+            [
+                f"Completed files: {ingest_runs.completed_count()}",
+                f"Failed files: {ingest_runs.failed_count()}",
+                f"Processed files: {ingest_runs.terminal_count()}",
+            ]
+        )
+    elif run.source == "local_memories":
+        lines.extend(_local_memory_source_counts(source_items))
+    else:
+        lines.extend(
+            [
+                f"Imported items: {source_items.count(run.source)}",
+                f"Completed items: {source_items.count(run.source, 'completed')}",
+                f"Failed items: {source_items.count(run.source, 'failed')}",
+            ]
+        )
+    lines.extend([f"Last update: {run.updated_at}", f"Last: {run.message or '-'}"])
+    return "\n".join(lines)
+
+
+def _local_memory_source_counts(source_items: SourceItemStore) -> list[str]:
+    sources = [
+        "openclaw_workspace",
+        "openclaw_workspace_memory",
+        "claude_projects",
+        "codex_projects",
+        "claude_project_memory",
+        "openclaw_sessions",
+        "claude_global",
+    ]
+    total = sum(source_items.count(source) for source in sources)
+    completed = sum(source_items.count(source, "completed") for source in sources)
+    failed = sum(source_items.count(source, "failed") for source in sources)
+    return [
+        f"Imported items: {total}",
+        f"Completed items: {completed}",
+        f"Failed items: {failed}",
+    ]
