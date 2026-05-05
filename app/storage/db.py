@@ -52,8 +52,11 @@ create table if not exists imported_source_items (
   source text not null,
   item_id text not null,
   fingerprint text not null,
+  size_bytes integer not null default 0,
+  mtime_ns integer not null default 0,
   status text not null,
   message text not null default '',
+  content_text text not null default '',
   updated_at text not null default current_timestamp,
   primary key (source, item_id)
 );
@@ -72,6 +75,9 @@ def init_db(path: Path) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "chat_events", "local_date", "text not null default ''")
+        _ensure_column(conn, "imported_source_items", "content_text", "text not null default ''")
+        _ensure_column(conn, "imported_source_items", "size_bytes", "integer not null default 0")
+        _ensure_column(conn, "imported_source_items", "mtime_ns", "integer not null default 0")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,10 +30,16 @@ class LocalMemoryDocument:
     item_id: str
     title: str
     text: str
+    size_bytes: int = 0
+    mtime_ns: int = 0
 
     @property
     def fingerprint(self) -> str:
         return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+    @property
+    def sanitized_text(self) -> str:
+        return sanitize_note(self.text).content
 
 
 def load_local_memory_documents(
@@ -62,6 +69,8 @@ def load_local_memory_documents(
             item_id=str(path.expanduser().resolve()),
             title=path.stem,
             text=text,
+            size_bytes=path.stat().st_size,
+            mtime_ns=path.stat().st_mtime_ns,
         )
         if document.fingerprint in seen_fingerprints:
             continue
@@ -98,6 +107,49 @@ async def ingest_local_memory_documents(
         except Exception:
             failed += 1
     return ingested, failed
+
+
+async def ingest_local_memory_delta(
+    document: LocalMemoryDocument,
+    previous_text: str,
+    memory: CogneeMemory,
+) -> tuple[bool, str]:
+    current_text = document.sanitized_text
+    delta_text = added_text_delta(previous_text, current_text)
+    if not delta_text.strip():
+        return False, current_text
+    delta_document = LocalMemoryDocument(
+        source=document.source,
+        item_id=document.item_id,
+        title=f"{document.title} updates",
+        text=delta_text,
+        size_bytes=document.size_bytes,
+        mtime_ns=document.mtime_ns,
+    )
+    ingested, _failed = await ingest_local_memory_documents([delta_document], memory)
+    return ingested > 0, current_text
+
+
+def added_text_delta(previous_text: str, current_text: str) -> str:
+    previous_lines = previous_text.splitlines()
+    current_lines = current_text.splitlines()
+    matcher = SequenceMatcher(a=previous_lines, b=current_lines, autojunk=False)
+    added: list[str] = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in {"insert", "replace"}:
+            added.extend(line for line in current_lines[j1:j2] if line.strip())
+    return "\n".join(added).strip()
+
+
+def should_ingest_delta(document: LocalMemoryDocument) -> bool:
+    path = Path(document.item_id)
+    if document.source in {"openclaw_workspace_memory", "openclaw_sessions", "claude_projects", "codex_projects"}:
+        return True
+    return bool(path.name.startswith("20") and path.suffix.lower() in {".md", ".qmd", ".txt", ".jsonl"})
+
+
+def is_unchanged_by_stat(document: LocalMemoryDocument, size_bytes: int, mtime_ns: int) -> bool:
+    return document.size_bytes == size_bytes and document.mtime_ns == mtime_ns
 
 
 def _openclaw_workspace_candidates(root: Path) -> list[tuple[str, Path]]:

@@ -7,7 +7,13 @@ from app.agent.skills import get_skill, render_skills
 from app.approvals.policy import ApprovalMode, ApprovalPolicy
 from app.memory.chat_importer import ingest_chat_documents, load_chat_documents
 from app.memory.audit import build_memory_audit, render_memory_audit
-from app.memory.local_sources import ingest_local_memory_documents, load_local_memory_documents
+from app.memory.local_sources import (
+    ingest_local_memory_delta,
+    ingest_local_memory_documents,
+    is_unchanged_by_stat,
+    load_local_memory_documents,
+    should_ingest_delta,
+)
 from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
@@ -349,7 +355,25 @@ def create_dispatcher(
                 await message.answer("Usage: /ingest_memories [limit|all]")
                 return
         docs = load_local_memory_documents()
-        pending = [doc for doc in docs if not source_items.is_terminal(doc.source, doc.item_id, doc.fingerprint)]
+        pending = []
+        for doc in docs:
+            record = source_items.get(doc.source, doc.item_id)
+            if record and is_unchanged_by_stat(doc, record.size_bytes, record.mtime_ns):
+                continue
+            if source_items.is_terminal(doc.source, doc.item_id, doc.fingerprint):
+                if record and not record.content_text:
+                    source_items.mark(
+                        doc.source,
+                        doc.item_id,
+                        doc.fingerprint,
+                        "completed",
+                        message="backfilled",
+                        content_text=doc.sanitized_text,
+                        size_bytes=doc.size_bytes,
+                        mtime_ns=doc.mtime_ns,
+                    )
+                continue
+            pending.append(doc)
         selected = pending if limit is None else pending[:limit]
         if not selected:
             await message.answer(f"All {len(docs)} local memory documents are already processed.")
@@ -362,12 +386,49 @@ def create_dispatcher(
             for index, doc in enumerate(selected, start=1):
                 message_text = f"{doc.source}: {doc.title}"
                 ingest_runs.update(run_id, index, message_text)
-                done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
-                if done:
-                    source_items.mark(doc.source, doc.item_id, doc.fingerprint, "completed")
-                    ingested += 1
+                record = source_items.get(doc.source, doc.item_id)
+                mode = "new"
+                if record and record.status == "completed" and should_ingest_delta(doc):
+                    done, current_text = await ingest_local_memory_delta(doc, record.content_text, agent.memory)
+                    failed_one = 0 if done or current_text == doc.sanitized_text else 1
+                    mode = "delta"
                 else:
-                    source_items.mark(doc.source, doc.item_id, doc.fingerprint, "failed", "Local memory ingest failed")
+                    done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
+                    current_text = doc.sanitized_text
+                if done:
+                    source_items.mark(
+                        doc.source,
+                        doc.item_id,
+                        doc.fingerprint,
+                        "completed",
+                        message=mode,
+                        content_text=current_text,
+                        size_bytes=doc.size_bytes,
+                        mtime_ns=doc.mtime_ns,
+                    )
+                    ingested += 1
+                elif mode == "delta" and current_text == doc.sanitized_text:
+                    source_items.mark(
+                        doc.source,
+                        doc.item_id,
+                        doc.fingerprint,
+                        "completed",
+                        message="delta-empty",
+                        content_text=current_text,
+                        size_bytes=doc.size_bytes,
+                        mtime_ns=doc.mtime_ns,
+                    )
+                else:
+                    source_items.mark(
+                        doc.source,
+                        doc.item_id,
+                        doc.fingerprint,
+                        "failed",
+                        "Local memory ingest failed",
+                        content_text=record.content_text if record else "",
+                        size_bytes=doc.size_bytes,
+                        mtime_ns=doc.mtime_ns,
+                    )
                     failed += failed_one or 1
                     await message.answer(
                         f"Local memory ingest skipped failed document: {index}/{len(selected)}\n"
@@ -377,7 +438,7 @@ def create_dispatcher(
                     await message.answer(
                         f"Local memory ingest progress: {index}/{len(selected)}\n"
                         f"Ingested: {ingested} Failed: {failed}\n"
-                        f"Last: {message_text}"
+                        f"Last: {message_text} ({mode})"
                     )
         except Exception as exc:
             ingest_runs.finish(run_id, "failed", f"Local memory ingest failed: {type(exc).__name__}: {exc}")

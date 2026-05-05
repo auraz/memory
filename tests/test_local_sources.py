@@ -1,6 +1,14 @@
 import asyncio
 
-from app.memory.local_sources import ingest_local_memory_documents, load_local_memory_documents
+from app.memory.local_sources import (
+    LocalMemoryDocument,
+    added_text_delta,
+    ingest_local_memory_delta,
+    ingest_local_memory_documents,
+    is_unchanged_by_stat,
+    load_local_memory_documents,
+    should_ingest_delta,
+)
 
 
 class FakeMemory:
@@ -66,3 +74,43 @@ def test_ingest_local_memory_documents(tmp_path):
     assert ingested == 1
     assert failed == 0
     assert "remember this" in memory.items[0][0]
+
+
+def test_added_text_delta_only_returns_new_lines():
+    delta = added_text_delta("a\nb\nc", "a\nb\nnew\nc\nalso new")
+
+    assert delta == "new\nalso new"
+
+
+def test_ingest_local_memory_delta_indexes_only_added_text():
+    memory = FakeMemory()
+    document = LocalMemoryDocument(
+        source="openclaw_workspace_memory",
+        item_id="/tmp/2026-05-05.md",
+        title="2026-05-05",
+        text="old line\nnew line",
+        size_bytes=18,
+        mtime_ns=200,
+    )
+
+    done, current_text = asyncio.run(ingest_local_memory_delta(document, "old line", memory))
+
+    assert done is True
+    assert current_text == "old line\nnew line"
+    assert "new line" in memory.items[0][0]
+    assert "old line" not in memory.items[0][0]
+
+
+def test_local_memory_stat_and_delta_classification():
+    document = LocalMemoryDocument(
+        source="codex_projects",
+        item_id="/tmp/session.jsonl",
+        title="session",
+        text="hello",
+        size_bytes=5,
+        mtime_ns=10,
+    )
+
+    assert is_unchanged_by_stat(document, 5, 10)
+    assert not is_unchanged_by_stat(document, 6, 10)
+    assert should_ingest_delta(document)

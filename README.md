@@ -162,6 +162,7 @@ Supported ingest sources:
 - OpenClaw or generic chat exports via `OPENCLAW_EXPORT_PATH`
 
 Chat exports can be JSON, JSONL, or Markdown. ChatGPT `conversations.json` and common Claude export JSON shapes are parsed into conversation transcripts before indexing.
+Local memory imports are incremental: unchanged files are skipped by size/mtime metadata, new files are indexed fully, and changed daily/session-style sources index only added text against the previous sanitized snapshot.
 
 Set paths in the shell or `.env`:
 
