@@ -16,6 +16,8 @@ tools:
     mode: allow
   obsidian.write:
     mode: deny
+  openclaw.agent_send:
+    mode: require_approval
   shell.run:
     mode: require_approval
   telegram.reply_to_user:

@@ -95,6 +95,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 - `/reset_memory confirm` clears Cognee's local `system`, `storage`, and `cache` data plus the ingest manifest when `memory.reset` is allowed.
 - `/remember <text>` proposes or stores a memory depending on policy.
 - `/pending` shows queued gated actions.
+- `/openclaw <task>` delegates a task to OpenClaw through `openclaw.agent_send`.
 - `/approve <id>` runs a queued action.
 - `/deny <id>` rejects a queued action.
 - `/ingest_obsidian [limit|all]` imports the next uningested markdown notes from the configured vault. Defaults to 25 notes.
@@ -130,6 +131,17 @@ Skills modify how the bot writes normal answers after automatic memory recall. T
 
 Normal chat messages automatically recall from Cognee and pass the retrieved context into the LLM. `/recall <topic>` is a direct recall/debug command.
 Normal chat messages also include a compact "today with this Telegram chat" context from the same chat, saved locally in SQLite.
+
+## OpenClaw Delegation
+
+`/openclaw <task>` queues a delegated OpenClaw agent turn. By default this uses:
+
+```bash
+openclaw agent --message "<task>" --session-id "frakir-telegram-<chat-id>" --timeout 600 --json --local
+```
+
+Configure it with `OPENCLAW_CLI_PATH`, `OPENCLAW_AGENT_ID`, `OPENCLAW_LOCAL`, and `OPENCLAW_TIMEOUT_SECONDS`.
+The default approval policy is `openclaw.agent_send: require_approval`, so Frakir asks for `/approve <id>` before OpenClaw can run.
 
 Supported ingest sources:
 

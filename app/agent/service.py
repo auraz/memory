@@ -7,6 +7,8 @@ from app.approvals.policy import ApprovalPolicy
 from app.approvals.queue import ApprovalQueue, PendingAction
 from app.memory.cognee_store import CogneeMemory
 from app.providers.base import LLMProvider
+from app.settings import settings
+from app.tools import run_openclaw_agent
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,20 @@ class AgentService:
         action_id = self.queue.create("memory.write", {"text": text, "source": "telegram"})
         return f"Queued memory write #{action_id}.\nUse /approve {action_id} or /deny {action_id}."
 
+    async def propose_openclaw_task(self, text: str, telegram_chat_id: str) -> str:
+        payload = {"message": text, "session_id": f"frakir-telegram-{telegram_chat_id}"}
+        mode = self.approvals.mode_for("openclaw.agent_send")
+        if mode.value == "allow":
+            return await self._run_openclaw(payload)
+        if mode.value == "deny":
+            return "OpenClaw delegation is denied by policy."
+        action_id = self.queue.create("openclaw.agent_send", payload)
+        return (
+            f"Queued OpenClaw task #{action_id}.\n"
+            f"Message: {text}\n"
+            f"Use /approve {action_id} or /deny {action_id}."
+        )
+
     async def approve_action(self, action_id: int) -> str:
         action = self.queue.get_pending(action_id)
         if action is None:
@@ -121,4 +137,17 @@ class AgentService:
                 source=str(action.payload.get("source", "telegram")),
             )
             return f"Approved and stored memory #{action.id}."
+        if action.tool_name == "openclaw.agent_send":
+            return await self._run_openclaw(action.payload)
         return f"Action #{action.id} has no executor yet: {action.tool_name}"
+
+    async def _run_openclaw(self, payload: dict) -> str:
+        result = await run_openclaw_agent(
+            message=str(payload["message"]),
+            session_id=str(payload["session_id"]),
+            cli_path=settings.openclaw_cli_path,
+            agent_id=settings.openclaw_agent_id,
+            local=settings.openclaw_local,
+            timeout_seconds=settings.openclaw_timeout_seconds,
+        )
+        return f"OpenClaw result:\n{result.text}"

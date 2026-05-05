@@ -151,6 +151,14 @@ def create_dispatcher(
     async def pending(message: Message) -> None:
         await message.answer(agent.render_pending()[:3900])
 
+    @dp.message(Command("openclaw"))
+    async def openclaw(message: Message) -> None:
+        text = (message.text or "").replace("/openclaw", "", 1).strip()
+        if not text:
+            await message.answer("Usage: /openclaw <task for OpenClaw>")
+            return
+        await message.answer(await agent.propose_openclaw_task(text, telegram_chat_id=str(message.chat.id)))
+
     @dp.message(Command("approve"))
     async def approve(message: Message) -> None:
         parts = (message.text or "").split(maxsplit=1)

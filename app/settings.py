@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("data/agent.sqlite")
     approval_policy_path: Path = Path("config/approvals.yaml")
     max_context_items: int = 8
+    openclaw_cli_path: str = "openclaw"
+    openclaw_agent_id: str | None = None
+    openclaw_local: bool = True
+    openclaw_timeout_seconds: int = 600
 
 
 settings = Settings()
