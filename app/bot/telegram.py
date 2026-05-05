@@ -354,19 +354,37 @@ def create_dispatcher(
         if not selected:
             await message.answer(f"All {len(docs)} local memory documents are already processed.")
             return
+        run_id = ingest_runs.start("local_memories", len(selected))
         await message.answer(f"Starting local memory ingest: {len(selected)}/{len(pending)} pending documents.")
         ingested = 0
         failed = 0
-        for index, doc in enumerate(selected, start=1):
-            done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
-            if done:
-                source_items.mark(doc.source, doc.item_id, doc.fingerprint, "completed")
-                ingested += 1
-            else:
-                source_items.mark(doc.source, doc.item_id, doc.fingerprint, "failed", "Local memory ingest failed")
-                failed += failed_one or 1
-            if index == len(selected) or index % 25 == 0:
-                await message.answer(f"Local memory ingest progress: {index}/{len(selected)}")
+        try:
+            for index, doc in enumerate(selected, start=1):
+                message_text = f"{doc.source}: {doc.title}"
+                ingest_runs.update(run_id, index, message_text)
+                done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
+                if done:
+                    source_items.mark(doc.source, doc.item_id, doc.fingerprint, "completed")
+                    ingested += 1
+                else:
+                    source_items.mark(doc.source, doc.item_id, doc.fingerprint, "failed", "Local memory ingest failed")
+                    failed += failed_one or 1
+                    await message.answer(
+                        f"Local memory ingest skipped failed document: {index}/{len(selected)}\n"
+                        f"{message_text}"
+                    )
+                if index == 1 or index == len(selected) or index % 5 == 0:
+                    await message.answer(
+                        f"Local memory ingest progress: {index}/{len(selected)}\n"
+                        f"Ingested: {ingested} Failed: {failed}\n"
+                        f"Last: {message_text}"
+                    )
+        except Exception as exc:
+            ingest_runs.finish(run_id, "failed", f"Local memory ingest failed: {type(exc).__name__}: {exc}")
+            await message.answer(f"Local memory ingest failed: {type(exc).__name__}: {exc}")
+            return
+        status = "completed_with_failures" if failed else "completed"
+        ingest_runs.finish(run_id, status, f"Ingested {ingested} local memory documents. Failed: {failed}.")
         await message.answer(
             f"Local memory ingest complete.\n"
             f"Ingested: {ingested}\n"

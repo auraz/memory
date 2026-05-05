@@ -23,6 +23,23 @@ def test_ingest_run_store_lifecycle(tmp_path):
         assert latest.message == "done"
 
 
+def test_ingest_run_store_tracks_local_memory_source(tmp_path):
+    db_path = tmp_path / "agent.sqlite"
+    init_db(db_path)
+
+    with connect(db_path) as conn:
+        store = IngestRunStore(conn)
+        run_id = store.start("local_memories", 1372)
+        store.update(run_id, 5, "claude_projects: user_work")
+
+        latest = store.latest()
+        assert latest is not None
+        assert latest.source == "local_memories"
+        assert latest.processed_files == 5
+        assert latest.total_files == 1372
+        assert latest.message == "claude_projects: user_work"
+
+
 def test_ingest_file_manifest_tracks_changed_files(tmp_path):
     db_path = tmp_path / "agent.sqlite"
     note = tmp_path / "note.md"
