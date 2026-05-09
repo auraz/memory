@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     openclaw_agent_id: str | None = None
     openclaw_local: bool = True
     openclaw_timeout_seconds: int = 600
+    apfel_cli_path: str = "apfel"
+    apfel_summary_sources: str = "claude_projects"
+    apfel_summary_min_chars: int = 8000
+    apfel_summary_chunk_chars: int = 1800
+    apfel_summary_max_chunks: int = 12
+    apfel_summary_timeout_seconds: int = 180
+    apfel_rolling_summary_max_chars: int = 1800
+    apfel_translate_unsupported_language: bool = True
+    apfel_llm_fallback_on_unsupported_language: bool = True
 
 
 settings = Settings()

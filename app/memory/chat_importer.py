@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.memory.cognee_store import CogneeMemory
+from app.runtime_limits import raise_file_descriptor_limit
 from app.settings import settings
 
 
@@ -204,6 +205,8 @@ async def _async_main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
+    soft_limit, hard_limit = raise_file_descriptor_limit()
+    print(f"Open file limit: soft={soft_limit} hard={hard_limit}", flush=True)
     memory = CogneeMemory(max_items=settings.max_context_items)
     docs = load_chat_documents(args.source, args.path)
     ingested, failed = await ingest_chat_documents(docs, memory, args.limit)

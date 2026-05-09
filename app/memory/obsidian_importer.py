@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.memory.cognee_store import CogneeMemory
+from app.runtime_limits import raise_file_descriptor_limit
 from app.settings import settings
 
 
@@ -217,6 +218,8 @@ async def _async_main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
+    soft_limit, hard_limit = raise_file_descriptor_limit()
+    print(f"Open file limit: soft={soft_limit} hard={hard_limit}", flush=True)
     memory = CogneeMemory(max_items=settings.max_context_items)
     count = await ingest_obsidian(args.vault, memory, limit=args.limit)
     print(f"Ingested {count} markdown notes from {args.vault}")

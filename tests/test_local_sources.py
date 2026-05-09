@@ -1,5 +1,6 @@
 import asyncio
 
+import app.memory.local_sources as local_sources
 from app.memory.local_sources import (
     LocalMemoryDocument,
     added_text_delta,
@@ -114,3 +115,165 @@ def test_local_memory_stat_and_delta_classification():
     assert is_unchanged_by_stat(document, 5, 10)
     assert not is_unchanged_by_stat(document, 6, 10)
     assert should_ingest_delta(document)
+
+
+def test_claude_projects_are_summarized_before_ingest(monkeypatch):
+    memory = FakeMemory()
+    document = LocalMemoryDocument(
+        source="claude_projects",
+        item_id="/tmp/session.md",
+        title="session",
+        text="raw claude transcript " * 20,
+    )
+
+    async def fake_summary(doc, text, progress=None):
+        assert doc == document
+        assert "raw claude transcript" in text
+        if progress is not None:
+            await progress("summarizing with apfel 1/1")
+        return "compact summary"
+
+    monkeypatch.setattr(local_sources.settings, "apfel_summary_sources", "claude_projects")
+    monkeypatch.setattr(local_sources.settings, "apfel_summary_min_chars", 10)
+    monkeypatch.setattr(local_sources, "summarize_text_with_apfel", fake_summary)
+
+    stages = []
+
+    async def progress(stage):
+        stages.append(stage)
+
+    ingested, failed = asyncio.run(ingest_local_memory_documents([document], memory, progress=progress))
+
+    assert ingested == 1
+    assert failed == 0
+    assert "compact summary" in memory.items[0][0]
+    assert "raw claude transcript" not in memory.items[0][0]
+    assert "summarizing with apfel 1/1" in stages
+
+
+def test_small_claude_project_files_skip_apfel_summary(monkeypatch):
+    memory = FakeMemory()
+    document = LocalMemoryDocument(
+        source="claude_projects",
+        item_id="/tmp/small.md",
+        title="small",
+        text="small memory",
+    )
+
+    async def fail_summary(_doc, _text, _progress=None):
+        raise AssertionError("summary should not run")
+
+    monkeypatch.setattr(local_sources.settings, "apfel_summary_sources", "claude_projects")
+    monkeypatch.setattr(local_sources.settings, "apfel_summary_min_chars", 100)
+    monkeypatch.setattr(local_sources, "summarize_text_with_apfel", fail_summary)
+
+    ingested, failed = asyncio.run(ingest_local_memory_documents([document], memory))
+
+    assert ingested == 1
+    assert failed == 0
+    assert "small memory" in memory.items[0][0]
+
+
+def test_apfel_unsupported_language_translates_then_retries(monkeypatch):
+    calls = []
+
+    async def fake_run_apfel(_prompt, text):
+        calls.append(text)
+        if len(calls) == 1:
+            raise local_sources.UnsupportedApfelLanguageError(
+                "error: [unsupported language] Unsupported language"
+            )
+        return "english summary"
+
+    async def fake_translate(text):
+        assert "привіт" in text
+        return "hello translated"
+
+    monkeypatch.setattr(local_sources.settings, "apfel_translate_unsupported_language", True)
+    monkeypatch.setattr(local_sources, "_run_apfel_summary", fake_run_apfel)
+    monkeypatch.setattr(local_sources, "_translate_to_english", fake_translate)
+
+    stages = []
+
+    async def progress(stage):
+        stages.append(stage)
+
+    result = asyncio.run(
+        local_sources._run_apfel_summary_with_translation("summarize", "привіт", progress)
+    )
+
+    assert result == "english summary"
+    assert calls == ["привіт", "hello translated"]
+    assert stages == [
+        "translating unsupported language to English",
+        "retrying apfel summary in English",
+    ]
+
+
+def test_apfel_unsupported_language_falls_back_to_llm_after_translation(monkeypatch):
+    calls = []
+
+    async def fake_run_apfel(_prompt, text):
+        calls.append(text)
+        raise local_sources.UnsupportedApfelLanguageError(
+            "error: [unsupported language] Unsupported language"
+        )
+
+    async def fake_translate(text):
+        assert "привіт" in text
+        return "hello translated"
+
+    async def fake_llm_summary(prompt, text):
+        assert prompt == "summarize"
+        assert text == "hello translated"
+        return "- english memory"
+
+    monkeypatch.setattr(local_sources.settings, "apfel_translate_unsupported_language", True)
+    monkeypatch.setattr(local_sources.settings, "apfel_llm_fallback_on_unsupported_language", True)
+    monkeypatch.setattr(local_sources, "_run_apfel_summary", fake_run_apfel)
+    monkeypatch.setattr(local_sources, "_translate_to_english", fake_translate)
+    monkeypatch.setattr(local_sources, "_summarize_with_llm", fake_llm_summary)
+
+    stages = []
+
+    async def progress(stage):
+        stages.append(stage)
+
+    result = asyncio.run(
+        local_sources._run_apfel_summary_with_translation("summarize", "привіт", progress)
+    )
+
+    assert result == "- english memory"
+    assert calls == ["привіт", "hello translated"]
+    assert stages == [
+        "translating unsupported language to English",
+        "retrying apfel summary in English",
+        "falling back to LLM summary",
+    ]
+
+
+def test_apfel_context_overflow_falls_back_to_llm(monkeypatch):
+    async def fake_run_apfel(_prompt, _text):
+        raise local_sources.ApfelContextOverflowError(
+            "error: [context overflow] Input exceeds the 4096-token context window"
+        )
+
+    async def fake_llm_summary(prompt, text):
+        assert prompt == "summarize"
+        assert text == "long text"
+        return "- compact memory"
+
+    monkeypatch.setattr(local_sources, "_run_apfel_summary", fake_run_apfel)
+    monkeypatch.setattr(local_sources, "_summarize_with_llm", fake_llm_summary)
+
+    stages = []
+
+    async def progress(stage):
+        stages.append(stage)
+
+    result = asyncio.run(
+        local_sources._run_apfel_summary_with_translation("summarize", "long text", progress)
+    )
+
+    assert result == "- compact memory"
+    assert stages == ["falling back to LLM summary after apfel context overflow"]

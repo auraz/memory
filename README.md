@@ -98,6 +98,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 - `/remember <text>` proposes or stores a memory depending on policy.
 - `/pending` shows queued gated actions.
 - `/openclaw <task>` delegates a task to OpenClaw through `openclaw.agent_send`.
+- `/pkill <apfel|openclaw|agent>` stops allowlisted stuck local processes through `process.pkill`.
 - `/approve <id>` runs a queued action.
 - `/deny <id>` rejects a queued action.
 - `/ingest_obsidian [limit|all]` imports the next uningested markdown notes from the configured vault. Defaults to 25 notes.
@@ -163,6 +164,8 @@ Supported ingest sources:
 
 Chat exports can be JSON, JSONL, or Markdown. ChatGPT `conversations.json` and common Claude export JSON shapes are parsed into conversation transcripts before indexing.
 Local memory imports are incremental: unchanged files are skipped by size/mtime metadata, new files are indexed fully, and changed daily/session-style sources index only added text against the previous sanitized snapshot.
+Large `claude_projects` files are summarized with local Apple Intelligence through `apfel` before Cognee indexing. Telegram reports slow stages such as `summarizing with apfel 2/6` and `indexing chunk 1/3` during `/ingest_memories`. The manifest still stores the sanitized original text for future changed-file diffs. Configure with `APFEL_CLI_PATH`, `APFEL_SUMMARY_SOURCES`, `APFEL_SUMMARY_MIN_CHARS`, `APFEL_SUMMARY_CHUNK_CHARS`, `APFEL_SUMMARY_MAX_CHUNKS`, and `APFEL_SUMMARY_TIMEOUT_SECONDS`.
+If Apfel rejects a chunk with an unsupported language, the importer translates that chunk to English with the configured LLM provider and retries Apfel. If Apfel still rejects the translated text, or if Apfel hits its context window, the configured LLM produces the compact memory summary directly so the batch can continue. Disable translation with `APFEL_TRANSLATE_UNSUPPORTED_LANGUAGE=false`, or disable the final LLM summary fallback with `APFEL_LLM_FALLBACK_ON_UNSUPPORTED_LANGUAGE=false`.
 
 Set paths in the shell or `.env`:
 
@@ -187,6 +190,34 @@ Or from the CLI:
 chat-export-ingest chatgpt /path/to/conversations.json --limit 25
 local-memory-ingest --limit 25
 ```
+
+For one-off non-Obsidian imports, generate local Apfel summaries first without touching Cognee:
+
+```bash
+apfel-summary-import plan
+apfel-summary-import summarize --limit 25
+apfel-summary-import summarize
+```
+
+The plan step is local and cheap. `summarize` processes worthwhile candidates by default. It skips existing summaries, empty/tiny low-signal files, Claude subagent transcripts, and raw Claude Code session `.jsonl` files when `sessions-index.json` already has a compact summary for that exact session. Use `--include-subagents` if you explicitly want to summarize raw Claude subagent implementation logs, or `--all-candidates` if you want to override the worthwhile filter.
+
+Summaries are written to `data/apfel_summaries/` by default. After reviewing or generating them, ingest only those summary files into Cognee:
+
+```bash
+apfel-summary-import ingest --limit 25
+apfel-summary-import ingest
+```
+
+After Obsidian and non-Obsidian summaries are imported, build draft memory palace rooms:
+
+```bash
+palace-build
+palace-build --output "../../1.Stable/ExpressionVault/Frakir Palace"
+palace-build --ingest
+```
+
+This writes `data/palace/about_me.md`, `cv.md`, `active_projects.md`, `preferences.md`, and `open_loops.md`. Files are marked draft because they are synthesized from recall and should be reviewed.
+Palace files evolve incrementally: Frakir updates only the block between `<!-- FRAKIR:BEGIN generated -->` and `<!-- FRAKIR:END generated -->`, preserves manual notes outside that block, and uses the previous generated block as context for the next update. Generated rooms are written as normal Obsidian notes without `[M1]` citation markers. If you write palace files into the Obsidian vault, let regular Obsidian ingest pick them up instead of using `--ingest`, which avoids duplicate indexing.
 
 ## Policy
 

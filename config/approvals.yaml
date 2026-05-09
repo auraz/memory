@@ -18,6 +18,8 @@ tools:
     mode: deny
   openclaw.agent_send:
     mode: allow
+  process.pkill:
+    mode: allow
   shell.run:
     mode: deny
   telegram.reply_to_user:

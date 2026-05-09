@@ -26,6 +26,8 @@ memory-audit = "app.memory_audit:main"
 obsidian-ingest = "app.memory.obsidian_importer:main"
 chat-export-ingest = "app.memory.chat_importer:main"
 local-memory-ingest = "app.memory.local_sources:main"
+apfel-summary-import = "app.memory.summary_importer:main"
+palace-build = "app.memory.palace:main"
 
 [build-system]
 requires = ["setuptools>=69"]

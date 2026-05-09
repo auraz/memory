@@ -8,17 +8,21 @@ from app.approvals.policy import ApprovalMode, ApprovalPolicy
 from app.memory.chat_importer import ingest_chat_documents, load_chat_documents
 from app.memory.audit import build_memory_audit, render_memory_audit
 from app.memory.local_sources import (
+    LocalMemoryDocument,
     ingest_local_memory_delta,
     ingest_local_memory_documents,
+    index_local_memory_text,
     is_unchanged_by_stat,
     load_local_memory_documents,
     should_ingest_delta,
+    summarize_text_with_apfel_rolling,
 )
 from app.memory.obsidian_importer import ingest_obsidian
 from app.memory.obsidian_importer import iter_markdown_files
 from app.settings import settings
 from app.storage import ChatEventStore, ChatSettingsStore, IngestRunStore, SourceItemStore
 from app.storage.ingest_runs import IngestRun
+from app.tools import PKILL_TARGETS, run_pkill
 
 DEFAULT_INGEST_LIMIT = 25
 
@@ -166,6 +170,37 @@ def create_dispatcher(
             await message.answer("Usage: /openclaw <task for OpenClaw>")
             return
         await message.answer(await agent.propose_openclaw_task(text, telegram_chat_id=str(message.chat.id)))
+
+    @dp.message(Command("pkill"))
+    async def pkill(message: Message) -> None:
+        parts = (message.text or "").split(maxsplit=1)
+        allowed = ", ".join(sorted(PKILL_TARGETS))
+        if len(parts) != 2:
+            await message.answer(f"Usage: /pkill <{allowed}>")
+            return
+        target = parts[1].strip().lower()
+        if target not in PKILL_TARGETS:
+            await message.answer(f"Unknown pkill target: {target}\nAllowed: {allowed}")
+            return
+        if not approvals.is_allowed("process.pkill"):
+            await message.answer("process.pkill is not allowed by policy.")
+            return
+        if target == "agent":
+            await message.answer("Stopping Frakir agent process. Restart from terminal after it exits.")
+        try:
+            result = await run_pkill(target)
+        except Exception as exc:
+            await message.answer(f"pkill failed: {type(exc).__name__}: {exc}")
+            return
+        if target == "agent":
+            return
+        if result.killed:
+            await message.answer(f"pkill {target}: stopped matching process.")
+        elif result.not_found:
+            await message.answer(f"pkill {target}: no matching process found.")
+        else:
+            details = f"\n{result.stderr}" if result.stderr else ""
+            await message.answer(f"pkill {target}: exited {result.returncode}.{details}")
 
     @dp.message(Command("approve"))
     async def approve(message: Message) -> None:
@@ -381,12 +416,36 @@ def create_dispatcher(
                 ingest_runs.update(run_id, index, message_text)
                 record = source_items.get(doc.source, doc.item_id)
                 mode = "new"
+
+                async def stage_progress(stage: str) -> None:
+                    stage_message = f"{message_text} ({mode}; {stage})"
+                    ingest_runs.update(run_id, index, stage_message)
+                    await message.answer(
+                        f"Local memory ingest progress: {index}/{len(selected)}\n"
+                        f"Ingested: {ingested} Failed: {failed}\n"
+                        f"Last: {message_text}\n"
+                        f"Stage: {stage}"
+                    )
+
                 if record and record.status == "completed" and should_ingest_delta(doc):
-                    done, current_text = await ingest_local_memory_delta(doc, record.content_text, agent.memory)
-                    failed_one = 0 if done or current_text == doc.sanitized_text else 1
                     mode = "delta"
+                    errors: list[str] = []
+                    done, current_text = await ingest_local_memory_delta(
+                        doc,
+                        record.content_text,
+                        agent.memory,
+                        progress=stage_progress,
+                        errors=errors,
+                    )
+                    failed_one = 0 if done or current_text == doc.sanitized_text else 1
                 else:
-                    done, failed_one = await ingest_local_memory_documents([doc], agent.memory)
+                    errors = []
+                    done, failed_one = await ingest_local_memory_documents(
+                        [doc],
+                        agent.memory,
+                        progress=stage_progress,
+                        errors=errors,
+                    )
                     current_text = doc.sanitized_text
                 if done:
                     source_items.mark(
@@ -417,7 +476,7 @@ def create_dispatcher(
                         doc.item_id,
                         doc.fingerprint,
                         "failed",
-                        "Local memory ingest failed",
+                        errors[0] if errors else "Local memory ingest failed",
                         content_text=record.content_text if record else "",
                         size_bytes=doc.size_bytes,
                         mtime_ns=doc.mtime_ns,
@@ -441,6 +500,104 @@ def create_dispatcher(
         ingest_runs.finish(run_id, status, f"Ingested {ingested} local memory documents. Failed: {failed}.")
         await message.answer(
             f"Local memory ingest complete.\n"
+            f"Ingested: {ingested}\n"
+            f"Failed: {failed}"
+        )
+
+    @dp.message(Command("ingest_summaries"))
+    async def ingest_summaries(message: Message) -> None:
+        parts = (message.text or "").split(maxsplit=1)
+        limit = DEFAULT_INGEST_LIMIT
+        if len(parts) == 2:
+            arg = parts[1].strip().lower()
+            if arg == "all":
+                limit = None
+            elif arg.isdigit():
+                limit = int(arg)
+            else:
+                await message.answer("Usage: /ingest_summaries [limit|all]")
+                return
+        try:
+            docs = _load_non_obsidian_summary_documents()
+        except Exception as exc:
+            await message.answer(f"Failed to load summary inputs: {type(exc).__name__}: {exc}")
+            return
+        pending = []
+        for doc in docs:
+            record = source_items.get(doc.source, doc.item_id)
+            if record and record.status == "completed" and record.fingerprint == doc.fingerprint:
+                continue
+            pending.append(doc)
+        selected = pending if limit is None else pending[:limit]
+        if not selected:
+            await message.answer(f"All {len(docs)} non-Obsidian documents are already processed.")
+            return
+        run_id = ingest_runs.start("apfel_summaries", len(selected))
+        await message.answer(f"Starting Apfel summary ingest: {len(selected)}/{len(pending)} pending documents.")
+        ingested = 0
+        failed = 0
+        try:
+            for index, doc in enumerate(selected, start=1):
+                message_text = f"{doc.source}: {doc.title}"
+                ingest_runs.update(run_id, index, message_text)
+
+                async def stage_progress(stage: str) -> None:
+                    ingest_runs.update(run_id, index, f"{message_text} (apfel-summary; {stage})")
+                    await message.answer(
+                        f"Apfel summary ingest progress: {index}/{len(selected)}\n"
+                        f"Ingested: {ingested} Failed: {failed}\n"
+                        f"Last: {message_text}\n"
+                        f"Stage: {stage}"
+                    )
+
+                try:
+                    current_text = doc.sanitized_text
+                    summary = await summarize_text_with_apfel_rolling(doc, current_text, progress=stage_progress)
+                    await index_local_memory_text(doc, summary, agent.memory, progress=stage_progress)
+                except Exception as exc:
+                    failed += 1
+                    error = f"{type(exc).__name__}: {exc}"
+                    source_items.mark(
+                        doc.source,
+                        doc.item_id,
+                        doc.fingerprint,
+                        "failed",
+                        error,
+                        content_text=doc.sanitized_text,
+                        size_bytes=doc.size_bytes,
+                        mtime_ns=doc.mtime_ns,
+                    )
+                    await message.answer(
+                        f"Apfel summary ingest skipped failed document: {index}/{len(selected)}\n"
+                        f"{message_text}\n"
+                        f"{error[:500]}"
+                    )
+                    continue
+                source_items.mark(
+                    doc.source,
+                    doc.item_id,
+                    doc.fingerprint,
+                    "completed",
+                    "apfel-summary",
+                    content_text=current_text,
+                    size_bytes=doc.size_bytes,
+                    mtime_ns=doc.mtime_ns,
+                )
+                ingested += 1
+                if index == 1 or index == len(selected) or index % 5 == 0:
+                    await message.answer(
+                        f"Apfel summary ingest progress: {index}/{len(selected)}\n"
+                        f"Ingested: {ingested} Failed: {failed}\n"
+                        f"Last: {message_text} (apfel-summary)"
+                    )
+        except Exception as exc:
+            ingest_runs.finish(run_id, "failed", f"Apfel summary ingest failed: {type(exc).__name__}: {exc}")
+            await message.answer(f"Apfel summary ingest failed: {type(exc).__name__}: {exc}")
+            return
+        status = "completed_with_failures" if failed else "completed"
+        ingest_runs.finish(run_id, status, f"Ingested {ingested} Apfel summaries. Failed: {failed}.")
+        await message.answer(
+            f"Apfel summary ingest complete.\n"
             f"Ingested: {ingested}\n"
             f"Failed: {failed}"
         )
@@ -485,6 +642,24 @@ def _source_path(source: str):
     return None
 
 
+def _load_non_obsidian_summary_documents() -> list[LocalMemoryDocument]:
+    docs = list(load_local_memory_documents())
+    for source in ("chatgpt", "claude", "openclaw"):
+        export_path = _source_path(source)
+        if export_path is None:
+            continue
+        for chat_doc in load_chat_documents(source, export_path):
+            docs.append(
+                LocalMemoryDocument(
+                    source=chat_doc.source,
+                    item_id=chat_doc.item_id,
+                    title=chat_doc.title,
+                    text=chat_doc.text,
+                )
+            )
+    return docs
+
+
 def render_ingest_status(
     run: IngestRun,
     ingest_runs: IngestRunStore,
@@ -503,7 +678,7 @@ def render_ingest_status(
                 f"Processed files: {ingest_runs.terminal_count()}",
             ]
         )
-    elif run.source == "local_memories":
+    elif run.source in {"local_memories", "apfel_summaries"}:
         lines.extend(_local_memory_source_counts(source_items))
     else:
         lines.extend(
