@@ -61,6 +61,14 @@ create table if not exists imported_source_items (
   primary key (source, item_id)
 );
 
+create table if not exists core_memory_blocks (
+  label text primary key,
+  description text not null default '',
+  value text not null default '',
+  char_limit integer not null default 2000,
+  updated_at text not null default current_timestamp
+);
+
 """
 
 

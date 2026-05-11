@@ -185,7 +185,7 @@ class CogneeMemory:
                 model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
                 os.environ["LLM_MODEL"] = f"anthropic/{model}"
             else:
-                model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+                model = os.environ.get("OPENAI_MODEL", "gpt-5.5")
                 os.environ["LLM_MODEL"] = f"openai/{model}"
 
         # Cognee defaults to OpenAI embeddings, so bridge the app's OpenAI key there too.

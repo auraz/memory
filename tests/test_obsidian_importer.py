@@ -4,6 +4,7 @@ from pathlib import Path
 from app.memory.obsidian_importer import (
     chunk_text,
     iter_markdown_files,
+    parse_limit,
     read_note_readonly,
     sanitize_note,
     validate_cognee_payload,
@@ -48,6 +49,12 @@ def test_read_note_readonly(tmp_path):
 def test_missing_vault_errors(tmp_path):
     with pytest.raises(FileNotFoundError):
         iter_markdown_files(tmp_path / "missing")
+
+
+def test_parse_limit_accepts_all_and_numbers():
+    assert parse_limit(None) is None
+    assert parse_limit("all") is None
+    assert parse_limit("25") == 25
 
 
 def test_sanitize_note_drops_huge_unbroken_lines():

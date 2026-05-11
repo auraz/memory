@@ -17,9 +17,13 @@ dependencies = [
 dev = [
   "pytest>=8.2.0",
 ]
+letta = [
+  "letta-client>=0.1.0",
+]
 
 [project.scripts]
 memory-agent = "app.main:main"
+agent = "app.agent_cli:main"
 memory-agent-dev = "app.dev:main"
 memory-agent-watch-errors = "app.log_watch:main"
 memory-audit = "app.memory_audit:main"
@@ -28,6 +32,9 @@ chat-export-ingest = "app.memory.chat_importer:main"
 local-memory-ingest = "app.memory.local_sources:main"
 apfel-summary-import = "app.memory.summary_importer:main"
 palace-build = "app.memory.palace:main"
+core-memory-seed = "app.agent.core_memory_seed:main"
+core-memory-sync = "app.agent.core_memory_seed:main"
+letta-docker-start = "app.letta_docker:main"
 
 [build-system]
 requires = ["setuptools>=69"]

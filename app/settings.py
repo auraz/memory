@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     telegram_bot_token_frakir: str = ""
     llm_provider: str = Field(default="openai")
     openai_api_key: str = ""
-    openai_model: str = "gpt-5-mini"
+    openai_model: str = "gpt-5.5"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-haiku-latest"
     obsidian_vault_path: Path = Path("../../1.Stable/ExpressionVault")
@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("data/agent.sqlite")
     approval_policy_path: Path = Path("config/approvals.yaml")
     max_context_items: int = 8
+    focused_context_items: int = 4
+    focused_context_chars: int = 2200
+    focused_memory_item_chars: int = 500
+    core_memory_chars: int = 3500
+    core_memory_auto_update: bool = True
+    letta_enabled: bool = False
+    letta_api_key: str = ""
+    letta_base_url: str = ""
+    letta_agent_id: str = ""
     openclaw_cli_path: str = "openclaw"
     openclaw_agent_id: str | None = None
     openclaw_local: bool = True

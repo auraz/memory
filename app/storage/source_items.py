@@ -95,3 +95,7 @@ class SourceItemStore:
                 (source, status),
             ).fetchone()
         return int(row["count"])
+
+    def clear(self) -> None:
+        self.conn.execute("delete from imported_source_items")
+        self.conn.commit()

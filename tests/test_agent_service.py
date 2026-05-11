@@ -7,19 +7,32 @@ from app.tools.openclaw import OpenClawResult
 
 
 class FakeProvider:
-    def __init__(self):
+    def __init__(self, responses: list[str] | None = None):
         self.system = ""
         self.user = ""
+        self.calls: list[tuple[str, str]] = []
+        self.responses = responses or ["done"]
 
     async def complete(self, system: str, user: str) -> str:
         self.system = system
         self.user = user
-        return "done"
+        self.calls.append((system, user))
+        if len(self.calls) <= len(self.responses):
+            return self.responses[len(self.calls) - 1]
+        return self.responses[-1]
 
 
 class FakeMemory:
+    def __init__(self):
+        self.last_query = ""
+        self.remembered: list[tuple[str, str | None]] = []
+
     async def safe_recall(self, query: str):
+        self.last_query = query
         return [MemoryItem(text=f"memory for {query}", source="test")], None
+
+    async def remember(self, text: str, source: str | None = None):
+        self.remembered.append((text, source))
 
 
 class FakeQueue:
@@ -27,7 +40,7 @@ class FakeQueue:
 
 
 def test_preview_context_shows_recalled_memory_and_auto_skill(tmp_path):
-    agent = AgentService(FakeProvider(), FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
+    agent = AgentService(FakeProvider(["research"]), FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
 
     preview = asyncio.run(agent.preview_context("what did I work on emotions?", skill_name="auto"))
 
@@ -38,7 +51,7 @@ def test_preview_context_shows_recalled_memory_and_auto_skill(tmp_path):
 
 
 def test_respond_sends_context_to_provider(tmp_path):
-    provider = FakeProvider()
+    provider = FakeProvider(["brainstorm", "done"])
     agent = AgentService(provider, FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
 
     response = asyncio.run(agent.respond("brainstorm ideas", skill_name="auto", today_context="Today with this Telegram chat: hi"))
@@ -46,8 +59,36 @@ def test_respond_sends_context_to_provider(tmp_path):
     assert response == "done"
     assert "Skill: brainstorm" in provider.system
     assert "Today with this Telegram chat: hi" in provider.user
-    assert "Relevant long-term memory" in provider.user
+    assert "Focused long-term memory" in provider.user
     assert "User message:\nbrainstorm ideas" in provider.user
+    assert "Memory scope:" in provider.system
+    assert "Tool policy:" in provider.system
+    assert "Output format:" in provider.system
+
+
+def test_llm_router_handles_typo_focus_request(tmp_path):
+    provider = FakeProvider(["planner"])
+    agent = AgentService(provider, FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
+
+    preview = asyncio.run(agent.preview_context("what should I docus now", skill_name="auto"))
+
+    assert preview.selected_skill == "planner"
+    assert "Choose the best answer skill" in provider.calls[0][1]
+
+
+def test_skill_limits_memory_context(tmp_path):
+    class ManyMemory:
+        async def safe_recall(self, query: str):
+            return [MemoryItem(text=f"memory {index}", source="test") for index in range(6)], None
+
+    agent = AgentService(FakeProvider(["debug"]), ManyMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), FakeQueue())
+
+    preview = asyncio.run(agent.preview_context("debug this traceback", skill_name="auto"))
+
+    assert preview.selected_skill == "debug"
+    assert "[M1]" in preview.context_packet
+    assert "[M2]" in preview.context_packet
+    assert "[M3]" not in preview.context_packet
 
 
 def test_openclaw_task_is_queued_by_default(tmp_path):
@@ -74,6 +115,25 @@ def test_openclaw_task_is_queued_by_default(tmp_path):
         "message": "show recent photos",
         "session_id": "frakir-telegram-123",
     }
+
+
+def test_memory_write_goes_to_palace_and_cognee(tmp_path):
+    memory = FakeMemory()
+    agent = AgentService(
+        FakeProvider(),
+        memory,
+        ApprovalPolicy(tmp_path / "approvals.yaml"),
+        FakeQueue(),
+        memory_palace_dir=tmp_path / "Frakir Palace",
+    )
+
+    response = asyncio.run(agent.propose_memory_write("remember to my preferences: prefer concise answers"))
+    palace_text = (tmp_path / "Frakir Palace" / "preferences.md").read_text(encoding="utf-8")
+
+    assert "Stored in memory palace" in response
+    assert "Indexed in Cognee source: palace:remember:preferences" in response
+    assert "prefer concise answers" in palace_text
+    assert memory.remembered[0][1] == "palace:remember:preferences"
 
 
 def test_openclaw_approved_action_runs_tool(tmp_path, monkeypatch):

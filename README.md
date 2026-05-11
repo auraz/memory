@@ -1,6 +1,6 @@
 # Frakir Memory Agent
 
-Frakir is a local-first Telegram agent that turns personal knowledge into usable context: Obsidian notes, Claude/Codex/OpenClaw project memories, chat exports, and same-day Telegram history are indexed into durable Cognee memory and recalled before every answer.
+Frakir is a local-first Telegram agent that turns personal knowledge into usable context: small Letta-style core memory blocks, Obsidian notes, Claude/Codex/OpenClaw project memories, chat exports, and same-day Telegram history.
 
 It is built for a private Mac workflow first, with public, inspectable code: read-only importers, explicit local storage, configurable OpenAI/Anthropic models, OpenClaw delegation, and a policy file for deciding which actions run automatically.
 
@@ -10,7 +10,8 @@ It is built for a private Mac workflow first, with public, inspectable code: rea
 - Uses Telegram as the control surface.
 - Uses OpenAI or Anthropic via environment configuration.
 - Maps `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` into Cognee's `LLM_API_KEY`.
-- Recalls relevant long-term memory automatically before normal chat responses.
+- Uses small core memory blocks for stable always-visible context.
+- Uses focused Cognee archive recall for normal chat responses.
 - Reads Obsidian notes from `OBSIDIAN_VAULT_PATH` and never writes back to the vault.
 - Stores Cognee data under `data/cognee/` by default.
 - Stores approval policy in `config/approvals.yaml`.
@@ -76,6 +77,15 @@ For development autoreload:
 memory-agent-dev
 ```
 
+For a one-shot terminal turn:
+
+```bash
+agent -- success business stories
+agent --context -- success business stories
+agent --set-goal "Make Frakir memory-first and use OpenClaw as the tool runtime."
+agent --goal-status
+```
+
 To watch Frakir and Cognee logs for warnings/errors in another terminal:
 
 ```bash
@@ -85,6 +95,31 @@ memory-agent-watch-errors
 For long jobs such as full-vault ingest, prefer `memory-agent` over `memory-agent-dev`.
 The dev runner restarts on file changes and can interrupt an active Cognee pipeline.
 
+## Telegram Chat
+
+Normal chat is the primary interface. Frakir preloads core memory, same-day Telegram context, focused Cognee recall, and an answer skill before replying.
+
+You can also use natural control phrases instead of slash commands:
+
+```text
+show core memory
+memory status
+show goal
+set goal reuse OpenClaw as Frakir's tool runtime
+goal status
+recall emotions
+context for what should I focus on now
+use planner skill
+skill auto
+refresh memory
+remember that I prefer short answers
+ask OpenClaw to inspect the latest logs
+```
+
+Slash commands remain available for debug/admin work and explicit dangerous actions such as reset, rebuild, approvals, and process stopping.
+
+Natural controls are backed by a typed action catalog in `app/bot/actions.py`. The LLM router chooses an action and arguments, Pydantic validates the arguments, and Telegram executes the matching action. The same catalog can export MCP-style or OpenAI-style tool schemas through `export_action_tool_schemas()`, which is the boundary to swap later into Pydantic AI tools or MCP tools without changing the Telegram UX.
+
 ## Telegram Commands
 
 - `/start` confirms the local agent is running.
@@ -92,10 +127,17 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 - `/context <message>` previews the long-term memory packet and skill that a normal answer would receive.
 - `/memory_status` shows whether memory is using Cognee or volatile fallback.
 - `/memory_audit` reports memory integrity counters and recent Cognee errors.
+- `/goal [show|status|clear|set <text>|<text>]` manages the active goal stored in core memory.
+- `/core_memory` shows the current Letta-style core memory blocks.
+- `/set_core_memory <block> <text>` updates a core memory block.
+- `/refresh_memory [all]` queues a background refresh inside the running bot: local memories, Obsidian, Frakir Palace, then changed palace notes.
+- `/rebuild_memory confirm` resets Cognee and import manifests, then runs a full refresh. Use this after changing source filters, for example after excluding `.jsonl` transcripts.
+- `/memory_jobs` shows the active and latest background memory job.
+- `/cancel_memory_job` asks the active memory job to stop.
 - `/skills` lists answer skills.
 - `/skill <name|auto|off>` sets the current chat's answer skill.
 - `/reset_memory confirm` clears Cognee's local `system`, `storage`, and `cache` data plus the ingest manifest when `memory.reset` is allowed.
-- `/remember <text>` proposes or stores a memory depending on policy.
+- `/remember <text>` proposes or stores a memory in Frakir Palace first, then indexes that entry into Cognee.
 - `/pending` shows queued gated actions.
 - `/openclaw <task>` delegates a task to OpenClaw through `openclaw.agent_send`.
 - `/pkill <apfel|openclaw|agent>` stops allowlisted stuck local processes through `process.pkill`.
@@ -117,6 +159,7 @@ uv run --reinstall-package personal-memory-agent memory-agent
 ## Answer Skills
 
 Skills modify how the bot writes normal answers after automatic memory recall. They do not change the memory store.
+Each skill is a small workflow contract: answer instructions, memory scope, tool policy, output format, and a per-skill Cognee context budget. This keeps debugging/building/memory answers from inheriting broad archive context as accidental requirements.
 
 ```text
 /skills
@@ -126,15 +169,81 @@ Skills modify how the bot writes normal answers after automatic memory recall. T
 /skill brainstorm
 /skill planner
 /skill journal
+/skill debug
+/skill build
+/skill decision
+/skill memory
 /skill off
 ```
 
-`/skill auto` uses a deterministic router over the message text. For example, “what did I work on emotions?” routes to `research`, while “brainstorm options” routes to `brainstorm`.
+`/skill auto` uses the configured LLM to route the message to the best answer skill, with deterministic fallback if routing fails. For example, “what did I work on emotions?” routes to `research`, while “brainstorm options” routes to `brainstorm`.
+
+Examples:
+
+- `debug` keeps Cognee context very narrow and returns root cause, verification, fix, residual risk.
+- `memory` focuses on ingest/recall quality and avoids bulk resets unless explicitly confirmed.
+- `decision` uses durable preferences from core memory and returns options, tradeoffs, recommendation.
 
 ## Memory Sources
 
-Normal chat messages automatically recall from Cognee and pass the retrieved context into the LLM. `/recall <topic>` is a direct recall/debug command.
+Normal chat messages include core memory first, then a small focused Cognee archive packet. `/recall <topic>` is a direct recall/debug command.
 Normal chat messages also include a compact "today with this Telegram chat" context from the same chat, saved locally in SQLite.
+
+## Core Memory
+
+Core memory follows Letta's memory-block model: small persistent blocks stay in context, while Cognee remains the larger searchable archive. This avoids treating every archive hit as a requirement.
+
+Default local blocks:
+
+- `human`
+- `persona`
+- `active_projects`
+- `active_goal`
+- `preferences`
+- `current_focus`
+
+Use Telegram to inspect or edit them:
+
+```text
+/core_memory
+/goal status
+/set_core_memory current_focus Keep current answers focused; ignore stale archive requirements unless directly relevant.
+```
+
+Explicit remember requests are written into Frakir Palace first. Preference-like memories go to `preferences.md`; project/goal memories go to `active_projects.md`; unclear memories go to `inbox.md`. Frakir then indexes the same entry into Cognee with a `palace:remember:*` source.
+
+Normal Telegram messages can update core memory automatically when they contain durable facts, preferences, project changes, or an explicit "remember" instruction. This is intentionally conservative: Frakir asks the model for a strict JSON patch against the small core blocks, ignores one-off task details, and never bulk-copies Cognee recall into Letta. Disable this with `CORE_MEMORY_AUTO_UPDATE=false`.
+
+To build the initial core memory set from the Frakir Palace after a full import:
+
+```bash
+uv run --reinstall-package personal-memory-agent palace-build --output "../../1.Stable/ExpressionVault/Frakir Palace"
+uv run --reinstall-package personal-memory-agent core-memory-sync --palace-dir "../../1.Stable/ExpressionVault/Frakir Palace"
+```
+
+Use `--dry-run` first to inspect the proposed block replacements without writing them.
+`core-memory-seed` remains as a backward-compatible alias for the same Palace-to-core sync.
+
+By default these blocks are stored in SQLite. To read/write blocks from a Letta server instead, install the optional client and configure an existing Letta agent:
+
+```bash
+uv sync --extra letta --extra dev
+```
+
+Start a local Letta server in Docker. The command reads `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the current shell and passes whichever are set into the container:
+
+```bash
+uv run letta-docker-start
+```
+
+```text
+LETTA_ENABLED=true
+LETTA_BASE_URL=http://localhost:8283
+LETTA_API_KEY=
+LETTA_AGENT_ID=...
+```
+
+Frakir still keeps a local SQLite copy as fallback. Cognee remains the archive; Letta/core memory controls what is always visible.
 
 ## OpenClaw Delegation
 
@@ -152,11 +261,11 @@ Supported ingest sources:
 - Obsidian markdown vault via `OBSIDIAN_VAULT_PATH`
 - Curated local memories via `/ingest_memories`:
   - `OPENCLAW_WORKSPACE_PATH` root files: `IDENTITY.md`, `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`
-  - `OPENCLAW_WORKSPACE_PATH/memory/**/*.{md,qmd,txt,json,jsonl}`
-  - `CLAUDE_PROJECTS_PATH/**/*.{md,qmd,txt,json,jsonl}`
-  - `CODEX_PROJECTS_PATH/**/*.{md,qmd,txt,json,jsonl}`
-  - `CLAUDE_PROJECT_MEMORY_PATH/**/*.{md,qmd,txt,json,jsonl}`
-  - `OPENCLAW_SESSIONS_PATH/**/*.{md,qmd,txt,json,jsonl}`
+  - `OPENCLAW_WORKSPACE_PATH/memory/**/*.{md,qmd,txt,json}`
+  - `CLAUDE_PROJECTS_PATH/**/*.{md,qmd,txt,json}`
+  - `CODEX_PROJECTS_PATH/**/*.{md,qmd,txt,json}`
+  - `CLAUDE_PROJECT_MEMORY_PATH/**/*.{md,qmd,txt,json}`
+  - `OPENCLAW_SESSIONS_PATH/**/*.{md,qmd,txt,json}`
   - `CLAUDE_GLOBAL_PATH`
 - ChatGPT exports via `CHATGPT_EXPORT_PATH`
 - Claude exports via `CLAUDE_EXPORT_PATH`
@@ -164,8 +273,20 @@ Supported ingest sources:
 
 Chat exports can be JSON, JSONL, or Markdown. ChatGPT `conversations.json` and common Claude export JSON shapes are parsed into conversation transcripts before indexing.
 Local memory imports are incremental: unchanged files are skipped by size/mtime metadata, new files are indexed fully, and changed daily/session-style sources index only added text against the previous sanitized snapshot.
+Raw `.jsonl` files are excluded from local memory discovery because they are usually noisy session transcripts. Use curated Markdown, text, JSON summaries, or explicit chat export import instead.
 Large `claude_projects` files are summarized with local Apple Intelligence through `apfel` before Cognee indexing. Telegram reports slow stages such as `summarizing with apfel 2/6` and `indexing chunk 1/3` during `/ingest_memories`. The manifest still stores the sanitized original text for future changed-file diffs. Configure with `APFEL_CLI_PATH`, `APFEL_SUMMARY_SOURCES`, `APFEL_SUMMARY_MIN_CHARS`, `APFEL_SUMMARY_CHUNK_CHARS`, `APFEL_SUMMARY_MAX_CHUNKS`, and `APFEL_SUMMARY_TIMEOUT_SECONDS`.
 If Apfel rejects a chunk with an unsupported language, the importer translates that chunk to English with the configured LLM provider and retries Apfel. If Apfel still rejects the translated text, or if Apfel hits its context window, the configured LLM produces the compact memory summary directly so the batch can continue. Disable translation with `APFEL_TRANSLATE_UNSUPPORTED_LANGUAGE=false`, or disable the final LLM summary fallback with `APFEL_LLM_FALLBACK_ON_UNSUPPORTED_LANGUAGE=false`.
+
+For daily background updates, prefer Telegram:
+
+```text
+/refresh_memory
+/memory_jobs
+```
+
+The refresh runs inside the already-running bot process, so the bot owns Cognee/Kuzu while it updates memory. Avoid running `obsidian-ingest`, `local-memory-ingest`, or `palace-build` as separate CLIs at the same time as the Telegram agent; those separate processes can hit Cognee database locks.
+`/refresh_memory` also syncs Frakir Palace into Letta/core memory before re-ingesting the changed Palace notes.
+If already-indexed sources need to be removed from Cognee, use `/rebuild_memory confirm`; it clears Cognee and rebuilds from the currently allowed sources.
 
 Set paths in the shell or `.env`:
 
@@ -199,7 +320,7 @@ apfel-summary-import summarize --limit 25
 apfel-summary-import summarize
 ```
 
-The plan step is local and cheap. `summarize` processes worthwhile candidates by default. It skips existing summaries, empty/tiny low-signal files, Claude subagent transcripts, and raw Claude Code session `.jsonl` files when `sessions-index.json` already has a compact summary for that exact session. Use `--include-subagents` if you explicitly want to summarize raw Claude subagent implementation logs, or `--all-candidates` if you want to override the worthwhile filter.
+The plan step is local and cheap. `summarize` processes worthwhile candidates by default. It skips existing summaries and empty/tiny low-signal files. Raw `.jsonl` transcripts are not discovered by local memory import; use compact Markdown/text/JSON summaries instead. Use `--all-candidates` if you want to override the worthwhile filter.
 
 Summaries are written to `data/apfel_summaries/` by default. After reviewing or generating them, ingest only those summary files into Cognee:
 

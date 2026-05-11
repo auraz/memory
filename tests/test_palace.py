@@ -4,6 +4,7 @@ from app.memory.cognee_store import MemoryItem
 from app.memory.palace import (
     GENERATED_BEGIN,
     PalaceRoomSpec,
+    append_palace_memory,
     build_palace,
     collect_room_context,
     extract_generated_content,
@@ -155,3 +156,20 @@ def test_strip_memory_markers_removes_source_labels():
     assert "[M2 source=test]" not in stripped
     assert "Draft fact" in stripped
     assert "Another fact" in stripped
+
+
+def test_append_palace_memory_routes_preferences(tmp_path):
+    path = append_palace_memory("remember to my preferences: prefer short direct answers", tmp_path)
+
+    assert path == tmp_path / "preferences.md"
+    text = path.read_text(encoding="utf-8")
+    assert "# Preferences" in text
+    assert "prefer short direct answers" in text
+    assert "## Remembered" in text
+
+
+def test_append_palace_memory_uses_inbox_for_unclear_memory(tmp_path):
+    path = append_palace_memory("interesting phrase from a conversation", tmp_path)
+
+    assert path == tmp_path / "inbox.md"
+    assert "interesting phrase" in path.read_text(encoding="utf-8")

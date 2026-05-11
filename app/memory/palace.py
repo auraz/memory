@@ -13,6 +13,7 @@ from app.settings import settings
 
 
 DEFAULT_PALACE_DIR = Path("data/palace")
+PALACE_INBOX_FILENAME = "inbox.md"
 GENERATED_BEGIN = "<!-- FRAKIR:BEGIN generated -->"
 GENERATED_END = "<!-- FRAKIR:END generated -->"
 MEMORY_MARKER_RE = re.compile(r"\s*\[M\d+(?:\s+[^\]]+)?\]")
@@ -84,6 +85,9 @@ ROOMS: tuple[PalaceRoomSpec, ...] = (
         sections=("Immediate Next Actions", "Pending Decisions", "Risks", "Follow-ups"),
     ),
 )
+
+ROOMS_BY_NAME = {room.name: room for room in ROOMS}
+ROOMS_BY_FILENAME = {room.filename: room for room in ROOMS}
 
 
 async def build_palace(
@@ -230,6 +234,42 @@ def extract_manual_content(text: str) -> str:
     manual = "\n\n".join(part.strip() for part in (before, after) if part.strip())
     lines = [line for line in manual.splitlines() if not line.startswith("# ")]
     return "\n".join(lines).strip()
+
+
+def append_palace_memory(text: str, output_dir: Path, room_name: str | None = None) -> Path:
+    memory = " ".join(text.split())
+    if not memory:
+        raise ValueError("Memory text cannot be empty")
+    output_dir.expanduser().mkdir(parents=True, exist_ok=True)
+    room = ROOMS_BY_NAME.get(room_name or infer_palace_room(memory))
+    if room is None:
+        path = output_dir.expanduser() / PALACE_INBOX_FILENAME
+        title = "Memory Inbox"
+    else:
+        path = output_dir.expanduser() / room.filename
+        title = room.title
+
+    existing = path.read_text(encoding="utf-8") if path.exists() else f"# {title}\n"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    section = "\n\n## Remembered\n" if "## Remembered" not in existing else ""
+    entry = f"{section}- {timestamp}: {memory}\n"
+    path.write_text(existing.rstrip() + "\n" + entry, encoding="utf-8")
+    return path
+
+
+def infer_palace_room(text: str) -> str | None:
+    lower = text.lower()
+    if any(token in lower for token in ("prefer", "preference", "preferences", "like answers", "communication style")):
+        return "preferences"
+    if any(token in lower for token in ("goal", "project", "building", "implement", "ship", "frakir", "openclaw")):
+        return "active_projects"
+    if any(token in lower for token in ("todo", "to do", "next", "follow up", "open loop", "blocker")):
+        return "open_loops"
+    if any(token in lower for token in ("cv", "resume", "career", "lyft", "role", "experience")):
+        return "cv"
+    if any(token in lower for token in ("about me", "identity", "i am", "my background")):
+        return "about_me"
+    return None
 
 
 async def _async_main() -> None:

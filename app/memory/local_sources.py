@@ -17,7 +17,7 @@ from app.settings import settings
 
 
 LOCAL_MEMORY_SOURCE = "local_memory"
-TEXT_SUFFIXES = {".md", ".qmd", ".txt", ".json", ".jsonl"}
+TEXT_SUFFIXES = {".md", ".qmd", ".txt", ".json"}
 ProgressCallback = Callable[[str], Awaitable[None]]
 OPENCLAW_ROOT_FILES = [
     "IDENTITY.md",
@@ -370,9 +370,11 @@ def added_text_delta(previous_text: str, current_text: str) -> str:
 
 def should_ingest_delta(document: LocalMemoryDocument) -> bool:
     path = Path(document.item_id)
+    if path.suffix.lower() == ".jsonl":
+        return False
     if document.source in {"openclaw_workspace_memory", "openclaw_sessions", "claude_projects", "codex_projects"}:
         return True
-    return bool(path.name.startswith("20") and path.suffix.lower() in {".md", ".qmd", ".txt", ".jsonl"})
+    return bool(path.name.startswith("20") and path.suffix.lower() in {".md", ".qmd", ".txt", ".json"})
 
 
 def is_unchanged_by_stat(document: LocalMemoryDocument, size_bytes: int, mtime_ns: int) -> bool:
@@ -410,8 +412,6 @@ def _file_candidate(source: str, path: Path) -> list[tuple[str, Path]]:
 
 def _read_text(path: Path) -> str:
     suffix = path.suffix.lower()
-    if suffix == ".jsonl":
-        return _read_jsonl_text(path)
     if suffix == ".json":
         return _read_json_text(path)
     return path.read_text(encoding="utf-8", errors="replace").strip()
@@ -422,22 +422,6 @@ def _read_json_text(path: Path) -> str:
         return _json_value_to_text(json.loads(path.read_text(encoding="utf-8", errors="replace"))).strip()
     except json.JSONDecodeError:
         return path.read_text(encoding="utf-8", errors="replace").strip()
-
-
-def _read_jsonl_text(path: Path) -> str:
-    lines: list[str] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            lines.append(line)
-            continue
-        text = _json_value_to_text(parsed).strip()
-        if text:
-            lines.append(text)
-    return "\n\n".join(lines).strip()
 
 
 def _json_value_to_text(value: Any) -> str:

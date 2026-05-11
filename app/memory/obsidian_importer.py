@@ -25,6 +25,15 @@ class SanitizedNote:
     removed_blocks: int = 0
 
 
+def parse_limit(value: str | None) -> int | None:
+    if value is None or value.lower() == "all":
+        return None
+    limit = int(value)
+    if limit < 1:
+        raise argparse.ArgumentTypeError("limit must be a positive integer or 'all'")
+    return limit
+
+
 def iter_markdown_files(vault_path: Path) -> list[Path]:
     vault_path = vault_path.expanduser().resolve()
     if not vault_path.exists():
@@ -214,14 +223,18 @@ async def ingest_obsidian(
 
 async def _async_main() -> None:
     parser = argparse.ArgumentParser(description="Read-only Obsidian vault ingestion into Cognee.")
+    parser.add_argument("limit_arg", nargs="?", help="Optional note limit, or 'all'.")
     parser.add_argument("--vault", type=Path, default=settings.obsidian_vault_path)
-    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--limit", type=str, default=None, help="Optional note limit, or 'all'.")
     args = parser.parse_args()
+    if args.limit_arg is not None and args.limit is not None:
+        parser.error("use either positional limit/all or --limit, not both")
+    limit = parse_limit(args.limit if args.limit is not None else args.limit_arg)
 
     soft_limit, hard_limit = raise_file_descriptor_limit()
     print(f"Open file limit: soft={soft_limit} hard={hard_limit}", flush=True)
     memory = CogneeMemory(max_items=settings.max_context_items)
-    count = await ingest_obsidian(args.vault, memory, limit=args.limit)
+    count = await ingest_obsidian(args.vault, memory, limit=limit)
     print(f"Ingested {count} markdown notes from {args.vault}")
 
 

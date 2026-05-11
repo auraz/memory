@@ -36,6 +36,10 @@ def test_load_local_memory_documents_from_configured_roots(tmp_path):
     openclaw.joinpath("memory", "2026-05-05.md").write_text("daily log", encoding="utf-8")
     claude_memory.joinpath("user_work.md").write_text("user work", encoding="utf-8")
     codex_projects.joinpath("session.jsonl").write_text('{"role":"user","content":"codex session"}\n', encoding="utf-8")
+    codex_projects.joinpath("project-summary.json").write_text(
+        '{"memory":"codex project summary"}',
+        encoding="utf-8",
+    )
     sessions.joinpath("openclaw-session.md").write_text("openclaw session", encoding="utf-8")
     global_path.write_text("global instructions", encoding="utf-8")
 
@@ -52,7 +56,8 @@ def test_load_local_memory_documents_from_configured_roots(tmp_path):
     assert "identity" in texts
     assert "daily log" in texts
     assert "user work" in texts
-    assert "user: codex session" in texts
+    assert "codex project summary" in texts
+    assert "codex session" not in texts
     assert "openclaw session" in texts
     assert "global instructions" in texts
 
@@ -114,7 +119,27 @@ def test_local_memory_stat_and_delta_classification():
 
     assert is_unchanged_by_stat(document, 5, 10)
     assert not is_unchanged_by_stat(document, 6, 10)
-    assert should_ingest_delta(document)
+    assert not should_ingest_delta(document)
+
+
+def test_jsonl_files_are_not_local_memory_sources(tmp_path):
+    codex_projects = tmp_path / "codex" / "projects"
+    codex_projects.mkdir(parents=True)
+    codex_projects.joinpath("session.jsonl").write_text(
+        '{"role":"user","content":"raw session should not import"}\n',
+        encoding="utf-8",
+    )
+
+    docs = load_local_memory_documents(
+        openclaw_workspace_path=tmp_path / "missing-openclaw",
+        claude_projects_path=tmp_path / "missing-claude",
+        codex_projects_path=codex_projects,
+        claude_project_memory_path=tmp_path / "missing-memory",
+        openclaw_sessions_path=tmp_path / "missing-sessions",
+        claude_global_path=tmp_path / "missing-global.md",
+    )
+
+    assert docs == []
 
 
 def test_claude_projects_are_summarized_before_ingest(monkeypatch):

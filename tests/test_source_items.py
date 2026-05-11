@@ -43,3 +43,17 @@ def test_source_item_store_tracks_content_and_stat_metadata(tmp_path):
     assert record.content_text == "old text"
     assert record.size_bytes == 10
     assert record.mtime_ns == 20
+
+
+def test_source_item_store_clear(tmp_path):
+    db_path = tmp_path / "agent.sqlite"
+    init_db(db_path)
+
+    with connect(db_path) as conn:
+        store = SourceItemStore(conn)
+        store.mark("claude_projects", "/tmp/session.json", "abc", "completed")
+        assert store.count("claude_projects") == 1
+
+        store.clear()
+
+        assert store.count("claude_projects") == 0
