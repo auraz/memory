@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     openclaw_agent_id: str | None = None
     openclaw_local: bool = True
     openclaw_timeout_seconds: int = 600
+    gws_client_secret_path: Path = Path("config/google/client_secret.json")
+    gws_authorized_user_path: Path = Path("data/google/authorized_user.json")
+    gws_scopes: str = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets"
     apfel_cli_path: str = "apfel"
     apfel_summary_sources: str = "claude_projects"
     apfel_summary_min_chars: int = 8000

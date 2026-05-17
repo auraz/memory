@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+SheetCell: TypeAlias = str | int | float | bool | None
+SheetRows: TypeAlias = list[list[SheetCell]]
 
 
 class EmptyArgs(BaseModel):
@@ -43,6 +46,41 @@ class OpenClawDelegateArgs(BaseModel):
     task: str = ""
 
 
+class GwsSheetsCreateArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = ""
+    rows: SheetRows = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class GwsSheetsReadArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spreadsheet_id: str = ""
+    range: str = ""
+
+
+class GwsSheetsUpdateArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spreadsheet_id: str = ""
+    range: str = ""
+    values: SheetRows = Field(default_factory=list)
+
+
+class GwsSheetsAppendArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spreadsheet_id: str = ""
+    worksheet: str = "Sheet1"
+    rows: SheetRows = Field(default_factory=list)
+
+
 class GoalArgs(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -62,6 +100,10 @@ ActionArgs: TypeAlias = (
     | SetSkillArgs
     | RememberArgs
     | OpenClawDelegateArgs
+    | GwsSheetsCreateArgs
+    | GwsSheetsReadArgs
+    | GwsSheetsUpdateArgs
+    | GwsSheetsAppendArgs
     | GoalArgs
 )
 
@@ -169,6 +211,30 @@ ACTION_SPECS: dict[str, ActionSpec] = {
         description="Delegate a task to OpenClaw.",
         args_schema=OpenClawDelegateArgs,
         args_hint='{"task":"..."}',
+    ),
+    "gws_sheets_create": ActionSpec(
+        name="gws_sheets_create",
+        description="Create a Google Sheets spreadsheet, optionally seeded with rows.",
+        args_schema=GwsSheetsCreateArgs,
+        args_hint='{"title":"...","rows":[["header"],["value"]]}',
+    ),
+    "gws_sheets_read": ActionSpec(
+        name="gws_sheets_read",
+        description="Read values from a Google Sheets range.",
+        args_schema=GwsSheetsReadArgs,
+        args_hint='{"spreadsheet_id":"...","range":"Sheet1!A1:B10"}',
+    ),
+    "gws_sheets_update": ActionSpec(
+        name="gws_sheets_update",
+        description="Replace values in a Google Sheets range.",
+        args_schema=GwsSheetsUpdateArgs,
+        args_hint='{"spreadsheet_id":"...","range":"Sheet1!A1:B2","values":[["A","B"]]}',
+    ),
+    "gws_sheets_append": ActionSpec(
+        name="gws_sheets_append",
+        description="Append rows to a Google Sheets worksheet.",
+        args_schema=GwsSheetsAppendArgs,
+        args_hint='{"spreadsheet_id":"...","worksheet":"Sheet1","rows":[["value"]]}',
     ),
     "goal": ActionSpec(
         name="goal",

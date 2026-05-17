@@ -16,6 +16,7 @@ from app.memory.cognee_store import CogneeMemory
 from app.memory.palace import append_palace_memory
 from app.providers.base import LLMProvider
 from app.settings import settings
+from app.tools import gws
 from app.tools import run_openclaw_agent
 
 ACTIVE_GOAL_BLOCK = "active_goal"
@@ -228,7 +229,10 @@ class AgentService:
         return f"Queued memory write #{action_id}.\nUse /approve {action_id} or /deny {action_id}."
 
     async def propose_openclaw_task(self, text: str, telegram_chat_id: str) -> str:
-        payload = {"message": text, "session_id": f"frakir-telegram-{telegram_chat_id}"}
+        payload = {
+            "message": prepare_openclaw_message(text),
+            "session_id": f"frakir-telegram-{telegram_chat_id}",
+        }
         mode = self.approvals.mode_for("openclaw.agent_send")
         if mode.value == "allow":
             return await self._run_openclaw(payload)
@@ -240,6 +244,16 @@ class AgentService:
             f"Message: {text}\n"
             f"Use /approve {action_id} or /deny {action_id}."
         )
+
+    async def propose_gws_sheets_action(self, tool_name: str, payload: dict) -> str:
+        mode = self.approvals.mode_for(tool_name)
+        if mode.value == "allow":
+            return await self._run_gws_sheets_action(tool_name, payload)
+        if mode.value == "deny":
+            return f"{tool_name} is denied by policy."
+        action_id = self.queue.create(tool_name, payload)
+        summary = payload.get("title") or payload.get("range") or payload.get("worksheet") or str(payload)
+        return f"Queued Google Workspace action #{action_id}: {summary}\nUse /approve {action_id} or /deny {action_id}."
 
     async def approve_action(self, action_id: int) -> str:
         action = self.queue.get_pending(action_id)
@@ -272,6 +286,8 @@ class AgentService:
             return f"Approved memory #{action.id}.\n{result}"
         if action.tool_name == "openclaw.agent_send":
             return await self._run_openclaw(action.payload)
+        if action.tool_name.startswith("gws.sheets."):
+            return await self._run_gws_sheets_action(action.tool_name, action.payload)
         return f"Action #{action.id} has no executor yet: {action.tool_name}"
 
     async def _store_memory_write(self, text: str) -> str:
@@ -293,3 +309,78 @@ class AgentService:
             timeout_seconds=settings.openclaw_timeout_seconds,
         )
         return f"OpenClaw result:\n{result.text}"
+
+    async def _run_gws_sheets_action(self, tool_name: str, payload: dict) -> str:
+        if tool_name == "gws.sheets.create":
+            result = await gws_create_spreadsheet(str(payload.get("title") or ""), payload.get("rows") or [])
+        elif tool_name == "gws.sheets.read":
+            result = await gws_read_range(str(payload.get("spreadsheet_id") or ""), str(payload.get("range") or ""))
+        elif tool_name == "gws.sheets.update":
+            result = await gws_update_range(
+                str(payload.get("spreadsheet_id") or ""),
+                str(payload.get("range") or ""),
+                payload.get("values") or [],
+            )
+        elif tool_name == "gws.sheets.append":
+            result = await gws_append_rows(
+                str(payload.get("spreadsheet_id") or ""),
+                str(payload.get("worksheet") or "Sheet1"),
+                payload.get("rows") or [],
+            )
+        else:
+            return f"Unknown Google Workspace action: {tool_name}"
+        return result.render()
+
+
+def prepare_openclaw_message(text: str) -> str:
+    request = text.strip()
+    if not request:
+        return request
+    lower = request.lower()
+    explicit_web_markers = ("search", "internet", "web", "browse", "look up", "website", "source")
+    local_markers = ("local", "logs", "files", "workspace", "repo", "disk")
+    if any(marker in lower for marker in local_markers) and not any(marker in lower for marker in explicit_web_markers):
+        return request
+    web_markers = (
+        "search",
+        "internet",
+        "web",
+        "browse",
+        "look up",
+        "latest",
+        "current",
+        "website",
+        "source",
+    )
+    if not any(marker in lower for marker in web_markers):
+        return request
+    return (
+        "Use web search/browser tools for this request. Do not answer from local files or memory unless the user "
+        "explicitly asks for local inspection. Answer in English unless the user's request is in another language. "
+        "Cite the sources you used with links. Keep the answer concise.\n\n"
+        f"User request:\n{request}"
+    )
+
+
+async def gws_create_spreadsheet(title: str, rows: object) -> gws.GwsSheetsResult:
+    import asyncio
+
+    return await asyncio.to_thread(gws.create_spreadsheet, title, rows)
+
+
+async def gws_read_range(spreadsheet_id: str, range_name: str) -> gws.GwsSheetsResult:
+    import asyncio
+
+    return await asyncio.to_thread(gws.read_range, spreadsheet_id, range_name)
+
+
+async def gws_update_range(spreadsheet_id: str, range_name: str, values: object) -> gws.GwsSheetsResult:
+    import asyncio
+
+    return await asyncio.to_thread(gws.update_range, spreadsheet_id, range_name, values)
+
+
+async def gws_append_rows(spreadsheet_id: str, worksheet: str, rows: object) -> gws.GwsSheetsResult:
+    import asyncio
+
+    return await asyncio.to_thread(gws.append_rows, spreadsheet_id, worksheet, rows)

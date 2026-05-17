@@ -98,6 +98,7 @@ The dev runner restarts on file changes and can interrupt an active Cognee pipel
 ## Telegram Chat
 
 Normal chat is the primary interface. Frakir preloads core memory, same-day Telegram context, focused Cognee recall, and an answer skill before replying.
+While Frakir is routing, recalling, calling the model, or delegating to OpenClaw, Telegram shows the bot as typing. Long background jobs still report progress as messages.
 
 You can also use natural control phrases instead of slash commands:
 
@@ -114,11 +115,16 @@ skill auto
 refresh memory
 remember that I prefer short answers
 ask OpenClaw to inspect the latest logs
+search the internet for latest Letta docs
+create a Google Sheet called Weekly Goals with columns Goal, Owner, Status
+append these rows to spreadsheet <id>
 ```
 
 Slash commands remain available for debug/admin work and explicit dangerous actions such as reset, rebuild, approvals, and process stopping.
 
 Natural controls are backed by a typed action catalog in `app/bot/actions.py`. The LLM router chooses an action and arguments, Pydantic validates the arguments, and Telegram executes the matching action. The same catalog can export MCP-style or OpenAI-style tool schemas through `export_action_tool_schemas()`, which is the boundary to swap later into Pydantic AI tools or MCP tools without changing the Telegram UX.
+
+When you reply to a Telegram message, Frakir includes that replied message as explicit context. This means short follow-ups like `search this`, `remember this`, or `what about this?` operate on the replied message instead of guessing from the current topic.
 
 ## Telegram Commands
 
@@ -140,6 +146,7 @@ Natural controls are backed by a typed action catalog in `app/bot/actions.py`. T
 - `/remember <text>` proposes or stores a memory in Frakir Palace first, then indexes that entry into Cognee.
 - `/pending` shows queued gated actions.
 - `/openclaw <task>` delegates a task to OpenClaw through `openclaw.agent_send`.
+- Google Workspace actions are natural-language only for now: create/read/update/append Google Sheets through `gws.sheets.*`.
 - `/pkill <apfel|openclaw|agent>` stops allowlisted stuck local processes through `process.pkill`.
 - `/approve <id>` runs a queued action.
 - `/deny <id>` rejects a queued action.
@@ -174,6 +181,52 @@ Each skill is a small workflow contract: answer instructions, memory scope, tool
 /skill decision
 /skill memory
 /skill off
+```
+
+## Google Workspace Tools
+
+Frakir has a Google Workspace tool layer, with Google Sheets as the first supported surface. It is deterministic tool execution, not browser automation:
+
+- `gws.sheets.create`: create a spreadsheet, optionally with starter rows.
+- `gws.sheets.read`: read a range such as `Sheet1!A1:D20`.
+- `gws.sheets.update`: replace values in a range.
+- `gws.sheets.append`: append rows to a worksheet.
+
+Set up OAuth once on the local Mac:
+
+```bash
+mkdir -p config/google
+# Save a Google Cloud OAuth desktop client secret here:
+# config/google/client_secret.json
+uv run --reinstall-package personal-memory-agent gws-auth
+```
+
+The auth command stores the local user token at `data/google/authorized_user.json`, which is ignored by git. The default scopes are:
+
+```text
+https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/spreadsheets
+```
+
+Natural examples:
+
+```text
+create a Google Sheet called Weekly Goals with columns Goal, Owner, Status
+read Sheet1 A1:D20 from spreadsheet <id>
+append rows to spreadsheet <id>: Project, Status / Frakir, Active
+```
+
+Policy defaults are conservative for writes:
+
+```yaml
+gws.sheets.read:
+  mode: allow
+gws.sheets.create:
+  mode: require_approval
+gws.sheets.update:
+  mode: require_approval
+gws.sheets.append:
+  mode: require_approval
 ```
 
 `/skill auto` uses the configured LLM to route the message to the best answer skill, with deterministic fallback if routing fails. For example, “what did I work on emotions?” routes to `research`, while “brainstorm options” routes to `brainstorm`.
@@ -255,6 +308,8 @@ openclaw agent --message "<task>" --session-id "frakir-telegram-<chat-id>" --tim
 
 Configure it with `OPENCLAW_CLI_PATH`, `OPENCLAW_AGENT_ID`, `OPENCLAW_LOCAL`, and `OPENCLAW_TIMEOUT_SECONDS`.
 The default approval policy is `openclaw.agent_send: allow`, so Frakir runs OpenClaw delegation immediately.
+
+Explicit web/current-info requests are routed to OpenClaw with instructions to use web search or browser tools, answer in English unless the request uses another language, and cite links. Frakir's normal model prompt does not claim absolute lack of internet access; it states that web/current-info work can be delegated to OpenClaw.
 
 Supported ingest sources:
 

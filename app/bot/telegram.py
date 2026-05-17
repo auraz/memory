@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import suppress
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -33,6 +35,53 @@ from app.storage.ingest_runs import IngestRun
 from app.tools import PKILL_TARGETS, run_pkill
 
 DEFAULT_INGEST_LIMIT = 25
+TYPING_PULSE_SECONDS = 4.0
+
+
+async def with_typing_indicator(message: Message, operation: Callable[[], Awaitable[Any]]) -> Any:
+    done = asyncio.Event()
+
+    async def pulse() -> None:
+        while not done.is_set():
+            with suppress(Exception):
+                await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+            with suppress(TimeoutError):
+                await asyncio.wait_for(done.wait(), timeout=TYPING_PULSE_SECONDS)
+
+    pulse_task = asyncio.create_task(pulse())
+    try:
+        return await operation()
+    finally:
+        done.set()
+        pulse_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await pulse_task
+
+
+def reply_context_text(message: Message, max_chars: int = 1800) -> str:
+    reply = getattr(message, "reply_to_message", None)
+    if reply is None:
+        return ""
+    text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
+    text = " ".join(str(text).split())
+    if not text:
+        return ""
+    return text[:max_chars].rstrip()
+
+
+def message_with_reply_context(message: Message) -> str:
+    text = str(getattr(message, "text", "") or "").strip()
+    reply_text = reply_context_text(message)
+    if not reply_text:
+        return text
+    return f"User message:\n{text}\n\nTelegram reply context:\n{reply_text}"
+
+
+def task_with_reply_context(task: str, message: Message) -> str:
+    reply_text = reply_context_text(message)
+    if not reply_text:
+        return task
+    return f"User task:\n{task}\n\nTelegram reply context:\n{reply_text}"
 
 
 def create_dispatcher(
@@ -497,7 +546,69 @@ def create_dispatcher(
         if not task:
             await message.answer("Tell me what to ask OpenClaw.")
             return
+        task = task_with_reply_context(task, message)
         await message.answer(await agent.propose_openclaw_task(task, telegram_chat_id=str(message.chat.id)))
+
+    async def run_gws_sheets_create_action(message: Message, args: dict[str, Any]) -> None:
+        title = str(args.get("title") or "").strip()
+        if not title:
+            await message.answer("Tell me the spreadsheet title.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.create",
+                    {"title": title, "rows": args.get("rows") or []},
+                )
+            )[:3900]
+        )
+
+    async def run_gws_sheets_read_action(message: Message, args: dict[str, Any]) -> None:
+        spreadsheet_id = str(args.get("spreadsheet_id") or "").strip()
+        range_name = str(args.get("range") or "").strip()
+        if not spreadsheet_id or not range_name:
+            await message.answer("Tell me the spreadsheet ID and range, for example `Sheet1!A1:D20`.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.read",
+                    {"spreadsheet_id": spreadsheet_id, "range": range_name},
+                )
+            )[:3900]
+        )
+
+    async def run_gws_sheets_update_action(message: Message, args: dict[str, Any]) -> None:
+        spreadsheet_id = str(args.get("spreadsheet_id") or "").strip()
+        range_name = str(args.get("range") or "").strip()
+        values = args.get("values") or []
+        if not spreadsheet_id or not range_name or not values:
+            await message.answer("Tell me the spreadsheet ID, target range, and values.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.update",
+                    {"spreadsheet_id": spreadsheet_id, "range": range_name, "values": values},
+                )
+            )[:3900]
+        )
+
+    async def run_gws_sheets_append_action(message: Message, args: dict[str, Any]) -> None:
+        spreadsheet_id = str(args.get("spreadsheet_id") or "").strip()
+        worksheet = str(args.get("worksheet") or "Sheet1").strip() or "Sheet1"
+        rows = args.get("rows") or []
+        if not spreadsheet_id or not rows:
+            await message.answer("Tell me the spreadsheet ID and rows to append.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.append",
+                    {"spreadsheet_id": spreadsheet_id, "worksheet": worksheet, "rows": rows},
+                )
+            )[:3900]
+        )
 
     async def run_goal_action(message: Message, args: dict[str, Any]) -> None:
         operation = str(args.get("operation") or "show").strip().lower()
@@ -526,6 +637,10 @@ def create_dispatcher(
         "refresh_memory": run_refresh_memory_action,
         "remember": run_remember_action,
         "openclaw_delegate": run_openclaw_delegate_action,
+        "gws_sheets_create": run_gws_sheets_create_action,
+        "gws_sheets_read": run_gws_sheets_read_action,
+        "gws_sheets_update": run_gws_sheets_update_action,
+        "gws_sheets_append": run_gws_sheets_append_action,
         "goal": run_goal_action,
     }
     missing_action_handlers = set(ACTION_SPECS) - set(natural_action_handlers)
@@ -535,7 +650,7 @@ def create_dispatcher(
 
     async def handle_natural_intent(message: Message) -> bool:
         assert message.text is not None
-        intent = await route_natural_intent(agent.provider, message.text)
+        intent = await route_natural_intent(agent.provider, message_with_reply_context(message))
         if not intent.should_handle:
             return False
 
@@ -897,18 +1012,23 @@ def create_dispatcher(
     @dp.message(F.text)
     async def chat(message: Message) -> None:
         assert message.text is not None
-        if await handle_natural_intent(message):
-            return
-        if active := active_memory_job_message():
-            await message.answer(active)
-            return
-        chat_id = str(message.chat.id)
-        selected = chat_settings.get(str(message.chat.id)).skill_name
-        today_context = chat_events.today_context(chat_id)
-        response = await agent.respond(message.text, skill_name=selected, today_context=today_context)
-        chat_events.append(chat_id, "user", message.text)
-        chat_events.append(chat_id, "assistant", response)
-        await message.answer(response[:3900])
+
+        async def handle_message() -> None:
+            if await handle_natural_intent(message):
+                return
+            if active := active_memory_job_message():
+                await message.answer(active)
+                return
+            chat_id = str(message.chat.id)
+            selected = chat_settings.get(str(message.chat.id)).skill_name
+            today_context = chat_events.today_context(chat_id)
+            user_message = message_with_reply_context(message)
+            response = await agent.respond(user_message, skill_name=selected, today_context=today_context)
+            chat_events.append(chat_id, "user", user_message)
+            chat_events.append(chat_id, "assistant", response)
+            await message.answer(response[:3900])
+
+        await with_typing_indicator(message, handle_message)
 
     return dp
 

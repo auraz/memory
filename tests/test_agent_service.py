@@ -1,8 +1,9 @@
 import asyncio
 
-from app.agent.service import AgentService
+from app.agent.service import AgentService, prepare_openclaw_message
 from app.approvals.policy import ApprovalPolicy
 from app.memory.cognee_store import MemoryItem
+from app.tools.gws import GwsSheetsResult
 from app.tools.openclaw import OpenClawResult
 
 
@@ -64,6 +65,7 @@ def test_respond_sends_context_to_provider(tmp_path):
     assert "Memory scope:" in provider.system
     assert "Tool policy:" in provider.system
     assert "Output format:" in provider.system
+    assert "Do not claim absolute lack of internet access" in provider.system
 
 
 def test_llm_router_handles_typo_focus_request(tmp_path):
@@ -111,10 +113,21 @@ def test_openclaw_task_is_queued_by_default(tmp_path):
 
     assert "Queued OpenClaw task #1" in response
     assert pending[0].tool_name == "openclaw.agent_send"
-    assert pending[0].payload == {
-        "message": "show recent photos",
-        "session_id": "frakir-telegram-123",
-    }
+    assert pending[0].payload["message"] == "show recent photos"
+    assert pending[0].payload["session_id"] == "frakir-telegram-123"
+
+
+def test_openclaw_web_search_tasks_get_search_instructions():
+    message = prepare_openclaw_message("search the internet for ChatGPT macOS local storage")
+
+    assert "Use web search/browser tools" in message
+    assert "Answer in English" in message
+    assert "Cite the sources" in message
+    assert "User request:\nsearch the internet" in message
+
+
+def test_openclaw_non_web_tasks_stay_plain():
+    assert prepare_openclaw_message("inspect latest local logs") == "inspect latest local logs"
 
 
 def test_memory_write_goes_to_palace_and_cognee(tmp_path):
@@ -164,3 +177,59 @@ def test_openclaw_approved_action_runs_tool(tmp_path, monkeypatch):
         )
 
     assert response == "OpenClaw result:\nran summarize inbox in frakir-telegram-123"
+
+
+def test_gws_sheets_create_is_queued_when_policy_requires_approval(tmp_path):
+    db_path = tmp_path / "agent.sqlite"
+    from app.approvals import ApprovalQueue
+    from app.storage import connect, init_db
+
+    policy_path = tmp_path / "approvals.yaml"
+    policy_path.write_text(
+        "version: 1\ndefault: allow\ntools:\n  gws.sheets.create:\n    mode: require_approval\n",
+        encoding="utf-8",
+    )
+    init_db(db_path)
+    with connect(db_path) as conn:
+        queue = ApprovalQueue(conn)
+        agent = AgentService(FakeProvider(), FakeMemory(), ApprovalPolicy(policy_path), queue)
+
+        response = asyncio.run(
+            agent.propose_gws_sheets_action("gws.sheets.create", {"title": "Weekly Goals", "rows": [["Goal"]]})
+        )
+        pending = queue.list_pending()
+
+    assert "Queued Google Workspace action #1" in response
+    assert pending[0].tool_name == "gws.sheets.create"
+    assert pending[0].payload == {"title": "Weekly Goals", "rows": [["Goal"]]}
+
+
+def test_gws_approved_action_runs_tool(tmp_path, monkeypatch):
+    from app.approvals import ApprovalQueue
+    from app.approvals.queue import PendingAction
+    from app.storage import connect, init_db
+    import app.agent.service as service_module
+
+    async def fake_create(title, rows):
+        return GwsSheetsResult(operation="create", title=title, spreadsheet_id="sheet-123", updated_rows=len(rows))
+
+    monkeypatch.setattr(service_module, "gws_create_spreadsheet", fake_create)
+    db_path = tmp_path / "agent.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        queue = ApprovalQueue(conn)
+        agent = AgentService(FakeProvider(), FakeMemory(), ApprovalPolicy(tmp_path / "approvals.yaml"), queue)
+
+        response = asyncio.run(
+            agent._execute_approved(
+                PendingAction(
+                    id=8,
+                    tool_name="gws.sheets.create",
+                    payload={"title": "Weekly Goals", "rows": [["Goal"]]},
+                    status="pending",
+                )
+            )
+        )
+
+    assert "Google Sheets create complete." in response
+    assert "Spreadsheet ID: sheet-123" in response
