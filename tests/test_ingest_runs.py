@@ -79,6 +79,27 @@ def test_clear_manifest(tmp_path):
         assert not store.is_file_completed(note)
 
 
+def test_abandon_running_marks_interrupted_runs_failed(tmp_path):
+    db_path = tmp_path / "agent.sqlite"
+    init_db(db_path)
+
+    with connect(db_path) as conn:
+        store = IngestRunStore(conn)
+        first_id = store.start("vault", 10)
+        second_id = store.start("local_memories", 5)
+        store.finish(second_id, "completed", "done")
+
+        abandoned = store.abandon_running("Process restarted.")
+        rows = conn.execute("select id, status, message, finished_at from ingest_runs order by id").fetchall()
+
+    assert abandoned == 1
+    assert rows[0]["id"] == first_id
+    assert rows[0]["status"] == "failed"
+    assert rows[0]["message"] == "Process restarted."
+    assert rows[0]["finished_at"] is not None
+    assert rows[1]["status"] == "completed"
+
+
 def test_failed_file_is_terminal(tmp_path):
     db_path = tmp_path / "agent.sqlite"
     note = tmp_path / "note.md"

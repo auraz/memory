@@ -610,6 +610,39 @@ def create_dispatcher(
             )[:3900]
         )
 
+    async def run_gws_sheets_replace_action(message: Message, args: dict[str, Any]) -> None:
+        spreadsheet_id = str(args.get("spreadsheet_id") or "").strip()
+        worksheet = str(args.get("worksheet") or "").strip()
+        rows = args.get("rows") or []
+        if not spreadsheet_id or not rows:
+            await message.answer("Tell me the spreadsheet ID and replacement rows.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.replace",
+                    {"spreadsheet_id": spreadsheet_id, "worksheet": worksheet, "rows": rows},
+                )
+            )[:3900]
+        )
+
+    async def run_gws_sheets_fill_column_action(message: Message, args: dict[str, Any]) -> None:
+        spreadsheet_id = str(args.get("spreadsheet_id") or "").strip()
+        worksheet = str(args.get("worksheet") or "").strip()
+        header = str(args.get("header") or "").strip()
+        value = args.get("value")
+        if not spreadsheet_id or not header:
+            await message.answer("Tell me the spreadsheet ID, column header, and value to fill.")
+            return
+        await message.answer(
+            (
+                await agent.propose_gws_sheets_action(
+                    "gws.sheets.fill_column",
+                    {"spreadsheet_id": spreadsheet_id, "worksheet": worksheet, "header": header, "value": value},
+                )
+            )[:3900]
+        )
+
     async def run_goal_action(message: Message, args: dict[str, Any]) -> None:
         operation = str(args.get("operation") or "show").strip().lower()
         text = str(args.get("text") or "").strip()
@@ -641,6 +674,8 @@ def create_dispatcher(
         "gws_sheets_read": run_gws_sheets_read_action,
         "gws_sheets_update": run_gws_sheets_update_action,
         "gws_sheets_append": run_gws_sheets_append_action,
+        "gws_sheets_replace": run_gws_sheets_replace_action,
+        "gws_sheets_fill_column": run_gws_sheets_fill_column_action,
         "goal": run_goal_action,
     }
     missing_action_handlers = set(ACTION_SPECS) - set(natural_action_handlers)
@@ -650,7 +685,17 @@ def create_dispatcher(
 
     async def handle_natural_intent(message: Message) -> bool:
         assert message.text is not None
-        intent = await route_natural_intent(agent.provider, message_with_reply_context(message))
+        recent_context = chat_events.today_context(
+            str(message.chat.id),
+            limit=16,
+            max_chars=9000,
+            max_event_chars=4000,
+        )
+        intent = await route_natural_intent(
+            agent.provider,
+            message_with_reply_context(message),
+            recent_context=recent_context,
+        )
         if not intent.should_handle:
             return False
 
@@ -1087,7 +1132,7 @@ def render_ingest_status(
         f"Source: {run.source}",
         f"Progress: {run.processed_files}/{run.total_files}",
     ]
-    if run.source == "vault":
+    if _is_obsidian_ingest_source(run.source):
         lines.extend(
             [
                 f"Completed files: {ingest_runs.completed_count()}",
@@ -1107,6 +1152,15 @@ def render_ingest_status(
         )
     lines.extend([f"Last update: {run.updated_at}", f"Last: {run.message or '-'}"])
     return "\n".join(lines)
+
+
+def _is_obsidian_ingest_source(source: str) -> bool:
+    if source == "vault":
+        return True
+    try:
+        return source == str(settings.obsidian_vault_path)
+    except Exception:
+        return False
 
 
 def _local_memory_source_counts(source_items: SourceItemStore) -> list[str]:

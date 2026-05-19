@@ -20,14 +20,6 @@ tools:
     mode: allow
   process.pkill:
     mode: allow
-  gws.sheets.append:
-    mode: require_approval
-  gws.sheets.create:
-    mode: require_approval
-  gws.sheets.read:
-    mode: allow
-  gws.sheets.update:
-    mode: require_approval
   shell.run:
     mode: deny
   telegram.reply_to_user:

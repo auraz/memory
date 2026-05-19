@@ -9,6 +9,7 @@ dependencies = [
   "cognee>=1.0.2",
   "google-auth-oauthlib>=1.2.0",
   "gspread>=6.0.0",
+  "mcp>=1.21.0",
   "openai>=1.40.0",
   "pydantic>=2.7.0",
   "pydantic-settings>=2.3.0",
@@ -38,6 +39,8 @@ core-memory-seed = "app.agent.core_memory_seed:main"
 core-memory-sync = "app.agent.core_memory_seed:main"
 letta-docker-start = "app.letta_docker:main"
 gws-auth = "app.tools.gws:main"
+gws-mcp-tools = "app.tools.gws_mcp:list_tools_main"
+gws-mcp-auth = "app.tools.gws_mcp_auth:main"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -50,3 +53,6 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "integration: tests that call external services and require explicit environment configuration",
+]

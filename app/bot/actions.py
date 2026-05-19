@@ -81,6 +81,28 @@ class GwsSheetsAppendArgs(BaseModel):
     rows: SheetRows = Field(default_factory=list)
 
 
+class GwsSheetsReplaceArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spreadsheet_id: str = ""
+    worksheet: str = ""
+    rows: SheetRows = Field(default_factory=list)
+
+
+class GwsSheetsFillColumnArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spreadsheet_id: str = ""
+    worksheet: str = ""
+    header: str = ""
+    value: SheetCell = ""
+
+    @field_validator("header")
+    @classmethod
+    def normalize_header(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
 class GoalArgs(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -104,6 +126,8 @@ ActionArgs: TypeAlias = (
     | GwsSheetsReadArgs
     | GwsSheetsUpdateArgs
     | GwsSheetsAppendArgs
+    | GwsSheetsReplaceArgs
+    | GwsSheetsFillColumnArgs
     | GoalArgs
 )
 
@@ -235,6 +259,18 @@ ACTION_SPECS: dict[str, ActionSpec] = {
         description="Append rows to a Google Sheets worksheet.",
         args_schema=GwsSheetsAppendArgs,
         args_hint='{"spreadsheet_id":"...","worksheet":"Sheet1","rows":[["value"]]}',
+    ),
+    "gws_sheets_replace": ActionSpec(
+        name="gws_sheets_replace",
+        description="Clear a Google Sheets worksheet and write a full replacement table.",
+        args_schema=GwsSheetsReplaceArgs,
+        args_hint='{"spreadsheet_id":"...","worksheet":"Sheet1 or empty for first tab","rows":[["header"],["value"]]}',
+    ),
+    "gws_sheets_fill_column": ActionSpec(
+        name="gws_sheets_fill_column",
+        description="Add or reuse a Google Sheets column and fill existing data rows with one value.",
+        args_schema=GwsSheetsFillColumnArgs,
+        args_hint='{"spreadsheet_id":"...","worksheet":"Sheet1 or empty for first tab","header":"timezone","value":"Europe/Kyiv"}',
     ),
     "goal": ActionSpec(
         name="goal",

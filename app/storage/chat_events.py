@@ -56,6 +56,7 @@ class ChatEventStore:
         local_date: str | None = None,
         limit: int = 12,
         max_chars: int = 1800,
+        max_event_chars: int = MAX_EVENT_CHARS,
     ) -> str:
         events = self.today_events(telegram_chat_id, local_date=local_date, limit=limit)
         if not events:
@@ -64,7 +65,7 @@ class ChatEventStore:
         lines = ["Today with this Telegram chat:"]
         for event in events:
             role = "User" if event.role == "user" else "Bot"
-            lines.append(f"- {role}: {_compact(event.content, MAX_EVENT_CHARS)}")
+            lines.append(f"- {role}: {_compact(event.content, max_event_chars)}")
         return _compact("\n".join(lines), max_chars)
 
     def clear_chat(self, telegram_chat_id: str) -> None:

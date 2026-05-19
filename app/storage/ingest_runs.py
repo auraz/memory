@@ -74,6 +74,21 @@ class IngestRunStore:
             updated_at=str(row["updated_at"]),
         )
 
+    def abandon_running(self, message: str = "Abandoned after process restart.") -> int:
+        cursor = self.conn.execute(
+            """
+            update ingest_runs
+            set status = 'failed',
+                message = ?,
+                updated_at = current_timestamp,
+                finished_at = current_timestamp
+            where status = 'running'
+            """,
+            (message,),
+        )
+        self.conn.commit()
+        return int(cursor.rowcount)
+
     def is_file_terminal(self, path: Path) -> bool:
         resolved = str(path.resolve())
         stat = path.stat()

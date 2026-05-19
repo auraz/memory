@@ -185,12 +185,28 @@ Each skill is a small workflow contract: answer instructions, memory scope, tool
 
 ## Google Workspace Tools
 
-Frakir has a Google Workspace tool layer, with Google Sheets as the first supported surface. It is deterministic tool execution, not browser automation:
+Frakir has a Google Workspace tool layer, with Google Sheets as the first supported surface. It is deterministic tool execution, not browser automation. The chat-facing actions stay stable while the backend can be local `gspread` or Workspace MCP:
 
 - `gws.sheets.create`: create a spreadsheet, optionally with starter rows.
 - `gws.sheets.read`: read a range such as `Sheet1!A1:D20`.
 - `gws.sheets.update`: replace values in a range.
 - `gws.sheets.append`: append rows to a worksheet.
+- `gws.sheets.replace`: clear a worksheet and write a full replacement table.
+- `gws.sheets.fill_column`: add or reuse a column and fill existing rows with one value.
+
+Workspace MCP is the preferred backend for generalizing beyond the custom Sheets helpers. It exposes the broader Google Workspace surface, including Sheets tools such as `read_sheet_values`, `modify_sheet_values`, and `create_spreadsheet`, plus Drive, Docs, Calendar, Gmail, and other service tools. Frakir composes those MCP primitives for higher-level requests such as appending rows or filling a column.
+
+To try the MCP backend:
+
+```bash
+export GWS_BACKEND=mcp
+export GWS_MCP_COMMAND=uvx
+export GWS_MCP_ARGS="workspace-mcp --tool-tier core"
+export GWS_MCP_USER_GOOGLE_EMAIL="you@example.com"
+uv run --reinstall-package personal-memory-agent gws-mcp-tools
+```
+
+`gws-mcp-tools` lists the tools visible from the configured MCP server. Workspace MCP tools require `user_google_email`, so Frakir injects `GWS_MCP_USER_GOOGLE_EMAIL` into tool calls. Workspace MCP still needs its own OAuth setup; follow its OAuth flow if the first real call asks for Google auth. The local backend remains available with `GWS_BACKEND=local`.
 
 Set up OAuth once on the local Mac:
 
@@ -214,20 +230,10 @@ Natural examples:
 create a Google Sheet called Weekly Goals with columns Goal, Owner, Status
 read Sheet1 A1:D20 from spreadsheet <id>
 append rows to spreadsheet <id>: Project, Status / Frakir, Active
+add timezone column with Europe/Kyiv to spreadsheet <url>
 ```
 
-Policy defaults are conservative for writes:
-
-```yaml
-gws.sheets.read:
-  mode: allow
-gws.sheets.create:
-  mode: require_approval
-gws.sheets.update:
-  mode: require_approval
-gws.sheets.append:
-  mode: require_approval
-```
+Google Workspace actions execute directly through the configured GWS backend. They are not staged in Frakir's approval queue.
 
 `/skill auto` uses the configured LLM to route the message to the best answer skill, with deterministic fallback if routing fails. For example, “what did I work on emotions?” routes to `research`, while “brainstorm options” routes to `brainstorm`.
 

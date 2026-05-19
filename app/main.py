@@ -20,6 +20,9 @@ async def _async_main() -> None:
     approvals = ApprovalPolicy(settings.approval_policy_path)
     queue = ApprovalQueue(conn)
     ingest_runs = IngestRunStore(conn)
+    abandoned_runs = ingest_runs.abandon_running()
+    if abandoned_runs:
+        print(f"Marked {abandoned_runs} stale ingest run(s) as failed.", flush=True)
     chat_settings = ChatSettingsStore(conn)
     chat_events = ChatEventStore(conn)
     source_items = SourceItemStore(conn)

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
+import re
 from typing import Any
 
 from app.settings import settings
@@ -20,6 +22,7 @@ class GwsSheetsResult:
     range_name: str = ""
     rows: SheetRows | None = None
     updated_rows: int = 0
+    details: str = ""
 
     def render(self) -> str:
         lines = [f"Google Sheets {self.operation} complete."]
@@ -36,6 +39,8 @@ class GwsSheetsResult:
         if self.rows is not None:
             preview = _preview_rows(self.rows)
             lines.append(f"Values:\n{preview}" if preview else "Values: empty")
+        if self.details:
+            lines.append(f"Details:\n{self.details}")
         return "\n".join(lines)
 
 
@@ -64,7 +69,7 @@ def create_spreadsheet(title: str, rows: SheetRows | None = None) -> GwsSheetsRe
 
 
 def read_range(spreadsheet_id: str, range_name: str) -> GwsSheetsResult:
-    spreadsheet_id = spreadsheet_id.strip()
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id)
     range_name = range_name.strip()
     if not spreadsheet_id:
         raise ValueError("Spreadsheet ID cannot be empty.")
@@ -86,7 +91,7 @@ def read_range(spreadsheet_id: str, range_name: str) -> GwsSheetsResult:
 
 
 def update_range(spreadsheet_id: str, range_name: str, values: SheetRows) -> GwsSheetsResult:
-    spreadsheet_id = spreadsheet_id.strip()
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id)
     range_name = range_name.strip()
     normalized_values = _normalize_rows(values)
     if not spreadsheet_id:
@@ -111,7 +116,7 @@ def update_range(spreadsheet_id: str, range_name: str, values: SheetRows) -> Gws
 
 
 def append_rows(spreadsheet_id: str, worksheet_name: str, rows: SheetRows) -> GwsSheetsResult:
-    spreadsheet_id = spreadsheet_id.strip()
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id)
     worksheet_name = (worksheet_name or "Sheet1").strip() or "Sheet1"
     normalized_rows = _normalize_rows(rows)
     if not spreadsheet_id:
@@ -129,6 +134,69 @@ def append_rows(spreadsheet_id: str, worksheet_name: str, rows: SheetRows) -> Gw
         url=_attr(spreadsheet, "url", ""),
         range_name=worksheet_name,
         updated_rows=len(normalized_rows),
+    )
+
+
+def replace_worksheet(spreadsheet_id: str, worksheet_name: str, rows: SheetRows) -> GwsSheetsResult:
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id)
+    worksheet_name = (worksheet_name or "").strip()
+    normalized_rows = _normalize_rows(rows)
+    if not spreadsheet_id:
+        raise ValueError("Spreadsheet ID cannot be empty.")
+    if not normalized_rows:
+        raise ValueError("Rows cannot be empty.")
+    client = _build_client(interactive=False)
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    worksheet = _worksheet(spreadsheet, worksheet_name or None)
+    worksheet.clear()
+    _worksheet_update(worksheet, "A1", normalized_rows)
+    with suppress(Exception):
+        worksheet.freeze(rows=1)
+    with suppress(Exception):
+        worksheet.columns_auto_resize(0, len(normalized_rows[0]))
+    return GwsSheetsResult(
+        operation="replace",
+        title=_attr(spreadsheet, "title", ""),
+        spreadsheet_id=spreadsheet_id,
+        url=_attr(spreadsheet, "url", ""),
+        range_name=worksheet_name or _attr(worksheet, "title", "first worksheet"),
+        updated_rows=len(normalized_rows),
+    )
+
+
+def fill_column(spreadsheet_id: str, worksheet_name: str, header: str, value: SheetValue) -> GwsSheetsResult:
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id)
+    worksheet_name = (worksheet_name or "").strip()
+    header = " ".join(str(header or "").split())
+    if not spreadsheet_id:
+        raise ValueError("Spreadsheet ID cannot be empty.")
+    if not header:
+        raise ValueError("Column header cannot be empty.")
+    client = _build_client(interactive=False)
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    worksheet = _worksheet(spreadsheet, worksheet_name or None)
+    headers = [str(cell).strip() for cell in worksheet.row_values(1)]
+    normalized_headers = [cell.lower() for cell in headers]
+    if header.lower() in normalized_headers:
+        column_index = normalized_headers.index(header.lower()) + 1
+    else:
+        column_index = len(headers) + 1
+        worksheet.update_cell(1, column_index, header)
+
+    row_count = len(worksheet.get_all_values())
+    updated_rows = 0
+    if row_count > 1:
+        values = [[_normalize_cell(value)] for _ in range(row_count - 1)]
+        range_name = f"{_a1(2, column_index)}:{_a1(row_count, column_index)}"
+        _worksheet_update(worksheet, range_name, values)
+        updated_rows = len(values)
+    return GwsSheetsResult(
+        operation="fill_column",
+        title=_attr(spreadsheet, "title", ""),
+        spreadsheet_id=spreadsheet_id,
+        url=_attr(spreadsheet, "url", ""),
+        range_name=f"{worksheet_name or _attr(worksheet, 'title', 'first worksheet')}!{header}",
+        updated_rows=updated_rows,
     )
 
 
@@ -154,6 +222,16 @@ def _build_client(interactive: bool):
         authorized_user_filename=str(authorized_user),
         scopes=_scopes(),
     )
+
+
+def extract_spreadsheet_id(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", text)
+    if match:
+        return match.group(1)
+    return text
 
 
 def _gspread():
@@ -219,6 +297,14 @@ def _preview_rows(rows: SheetRows, max_rows: int = 8, max_chars: int = 1200) -> 
     if len(rendered) > max_chars:
         rendered = rendered[: max_chars - 3].rstrip() + "..."
     return rendered
+
+
+def _a1(row: int, column: int) -> str:
+    letters = ""
+    while column:
+        column, remainder = divmod(column - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return f"{letters}{row}"
 
 
 def _attr(value: Any, name: str, default: str) -> str:

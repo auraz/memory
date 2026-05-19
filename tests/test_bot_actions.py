@@ -37,6 +37,24 @@ def test_validate_action_args_for_google_sheets_create():
     assert args == {"title": "Weekly Goals", "rows": [["Goal", "Status"], ["Ship", "Open"]]}
 
 
+def test_validate_action_args_for_google_sheets_replace():
+    args = validate_action_args(
+        "gws_sheets_replace",
+        {"spreadsheet_id": "sheet-123", "worksheet": "", "rows": [["Name"], ["Grammarly"]]},
+    )
+
+    assert args == {"spreadsheet_id": "sheet-123", "worksheet": "", "rows": [["Name"], ["Grammarly"]]}
+
+
+def test_validate_action_args_for_google_sheets_fill_column():
+    args = validate_action_args(
+        "gws_sheets_fill_column",
+        {"spreadsheet_id": "sheet-123", "worksheet": "", "header": " time   zone ", "value": "Europe/Kyiv"},
+    )
+
+    assert args == {"spreadsheet_id": "sheet-123", "worksheet": "", "header": "time zone", "value": "Europe/Kyiv"}
+
+
 def test_validate_action_args_rejects_unknown_action():
     assert validate_action_args("reset_memory", {"confirm": True}) == {}
 
@@ -52,12 +70,16 @@ def test_export_action_tool_schemas_as_mcp_tools():
     recall = next(tool for tool in tools if tool["name"] == "recall")
     goal = next(tool for tool in tools if tool["name"] == "goal")
     gws_create = next(tool for tool in tools if tool["name"] == "gws_sheets_create")
+    gws_replace = next(tool for tool in tools if tool["name"] == "gws_sheets_replace")
+    gws_fill_column = next(tool for tool in tools if tool["name"] == "gws_sheets_fill_column")
 
     assert recall["description"] == "Direct memory search/debug."
     assert recall["inputSchema"]["type"] == "object"
     assert "topic" in recall["inputSchema"]["properties"]
     assert "operation" in goal["inputSchema"]["properties"]
     assert "rows" in gws_create["inputSchema"]["properties"]
+    assert gws_replace["description"] == "Clear a Google Sheets worksheet and write a full replacement table."
+    assert "value" in gws_fill_column["inputSchema"]["properties"]
 
 
 def test_export_action_tool_schemas_as_openai_tools():

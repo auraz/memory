@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     gws_client_secret_path: Path = Path("config/google/client_secret.json")
     gws_authorized_user_path: Path = Path("data/google/authorized_user.json")
     gws_scopes: str = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets"
+    gws_backend: str = "local"
+    gws_mcp_command: str = "uvx"
+    gws_mcp_args: str = "workspace-mcp --tool-tier core"
+    gws_mcp_user_google_email: str = ""
+    gws_mcp_timeout_seconds: int = 120
     apfel_cli_path: str = "apfel"
     apfel_summary_sources: str = "claude_projects"
     apfel_summary_min_chars: int = 8000
